@@ -28,7 +28,7 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    console.log('ManyChat webhook received for user:', user_id);
+    console.log('ManyChat webhook received for user:', user_id, new Date().toISOString());
 
     // Extract custom fields
     const customFields = body.custom_fields || {};
