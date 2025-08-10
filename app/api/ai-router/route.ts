@@ -33,6 +33,11 @@ export async function POST(request: NextRequest) {
     // Extract custom fields
     const customFields = body.custom_fields || {};
     
+    // Debug logging for sent_link
+    console.log('MCB_SENT_LINK raw value:', customFields['MCB_SENT_LINK']);
+    console.log('MCB_SENT_LINK type:', typeof customFields['MCB_SENT_LINK']);
+    console.log('All custom fields:', JSON.stringify(customFields, null, 2));
+    
     // Parse subscription date
     const subscriptionDate = body.subscribed ? new Date(body.subscribed).toISOString() : null;
     
@@ -81,17 +86,18 @@ export async function POST(request: NextRequest) {
       has_months_value: !!customFields['Months Postpartum'],
       
       // Funnel progression from MCB fields (lowercase for PostgreSQL)
-      lead_contact: customFields['MCB_LEAD_CONTACT'] === true || customFields['MCB_LEAD_CONTACT'] === 'true',
-      lead: customFields['MCB_LEAD'] === true || customFields['MCB_LEAD'] === 'true',
-      sent_email_magnet: customFields['MCB_SENT_EMAIL_MAGNET'] === true || customFields['MCB_SENT_EMAIL_MAGNET'] === 'true',
-      opened_email_magnet: customFields['MCB_OPENED_EMAIL_MAGNET'] === true || customFields['MCB_OPENED_EMAIL_MAGNET'] === 'true',
-      sent_link: customFields['MCB_SENT_LINK'] === true || customFields['MCB_SENT_LINK'] === 'true',
-      clicked_link: customFields['MCB_CLICKED_LINK'] === true || customFields['MCB_CLICKED_LINK'] === 'true',
-      ready_to_book: customFields['MCB_READY_TO_BOOK'] === true || customFields['MCB_READY_TO_BOOK'] === 'true',
-      booked: customFields['MCB_BOOKED'] === true || customFields['MCB_BOOKED'] === 'true',
-      attended: customFields['MCB_ATTENDED'] === true || customFields['MCB_ATTENDED'] === 'true',
-      sent_package: customFields['MCB_SENT_PACKAGE'] === true || customFields['MCB_SENT_PACKAGE'] === 'true',
-      bought_package: customFields['MCB_BOUGHT_PACKAGE'] === true || customFields['MCB_BOUGHT_PACKAGE'] === 'true',
+      // ManyChat might send: true, "true", "True", "TRUE", 1, "1", "Yes", "yes"
+      lead_contact: ['true', 'True', 'TRUE', '1', 'Yes', 'yes', 'YES', true, 1].includes(customFields['MCB_LEAD_CONTACT']),
+      lead: ['true', 'True', 'TRUE', '1', 'Yes', 'yes', 'YES', true, 1].includes(customFields['MCB_LEAD']),
+      sent_email_magnet: ['true', 'True', 'TRUE', '1', 'Yes', 'yes', 'YES', true, 1].includes(customFields['MCB_SENT_EMAIL_MAGNET']),
+      opened_email_magnet: ['true', 'True', 'TRUE', '1', 'Yes', 'yes', 'YES', true, 1].includes(customFields['MCB_OPENED_EMAIL_MAGNET']),
+      sent_link: ['true', 'True', 'TRUE', '1', 'Yes', 'yes', 'YES', true, 1].includes(customFields['MCB_SENT_LINK']),
+      clicked_link: ['true', 'True', 'TRUE', '1', 'Yes', 'yes', 'YES', true, 1].includes(customFields['MCB_CLICKED_LINK']),
+      ready_to_book: ['true', 'True', 'TRUE', '1', 'Yes', 'yes', 'YES', true, 1].includes(customFields['MCB_READY_TO_BOOK']),
+      booked: ['true', 'True', 'TRUE', '1', 'Yes', 'yes', 'YES', true, 1].includes(customFields['MCB_BOOKED']),
+      attended: ['true', 'True', 'TRUE', '1', 'Yes', 'yes', 'YES', true, 1].includes(customFields['MCB_ATTENDED']),
+      sent_package: ['true', 'True', 'TRUE', '1', 'Yes', 'yes', 'YES', true, 1].includes(customFields['MCB_SENT_PACKAGE']),
+      bought_package: ['true', 'True', 'TRUE', '1', 'Yes', 'yes', 'YES', true, 1].includes(customFields['MCB_BOUGHT_PACKAGE']),
       
       // Summary field (will be populated later via thread query)
       summary: null,
@@ -124,6 +130,10 @@ export async function POST(request: NextRequest) {
       .single();
 
     if (existingContact) {
+      // Debug what we're merging
+      console.log('Existing sent_link value:', existingContact.sent_link);
+      console.log('New sent_link value:', contactData.sent_link);
+      
       // Merge with existing data - only update fields that have new values
       // Keep existing boolean values unless explicitly set to true in new data
       contactData.lead_contact = contactData.lead_contact || existingContact.lead_contact;
@@ -137,6 +147,8 @@ export async function POST(request: NextRequest) {
       contactData.attended = contactData.attended || existingContact.attended;
       contactData.sent_package = contactData.sent_package || existingContact.sent_package;
       contactData.bought_package = contactData.bought_package || existingContact.bought_package;
+      
+      console.log('Final sent_link value to save:', contactData.sent_link);
       
       // Keep existing values if new ones are null
       contactData.symptoms = contactData.symptoms || existingContact.symptoms;
