@@ -31,13 +31,20 @@ CREATE TABLE public.contacts (
   has_symptoms_value BOOLEAN DEFAULT FALSE,
   has_months_value BOOLEAN DEFAULT FALSE,
   
-  -- Funnel progression booleans
-  sent_link BOOLEAN DEFAULT FALSE,
-  clicked_link BOOLEAN DEFAULT FALSE,
-  booked BOOLEAN DEFAULT FALSE,
-  attended BOOLEAN DEFAULT FALSE,
-  sent_package_link BOOLEAN DEFAULT FALSE,
-  bought_package BOOLEAN DEFAULT FALSE,
+  -- Funnel progression booleans (matching MCB field names exactly)
+  LEAD_CONTACT BOOLEAN DEFAULT FALSE,
+  LEAD BOOLEAN DEFAULT FALSE,
+  SENT_LINK BOOLEAN DEFAULT FALSE,
+  CLICKED_LINK BOOLEAN DEFAULT FALSE,
+  READY_TO_BOOK BOOLEAN DEFAULT FALSE,
+  BOOKED BOOLEAN DEFAULT FALSE,
+  ATTENDED BOOLEAN DEFAULT FALSE,
+  SENT_PACKAGE BOOLEAN DEFAULT FALSE,
+  BOUGHT_PACKAGE BOOLEAN DEFAULT FALSE,
+  
+  -- Conversation summary for sales reps
+  summary TEXT,
+  summary_updated_at TIMESTAMPTZ,
   
   -- Purchase data
   total_purchased DECIMAL(10,2) DEFAULT 0,
@@ -72,13 +79,14 @@ CREATE TABLE public.contacts (
 CREATE INDEX idx_contacts_user_id ON public.contacts(user_id);
 CREATE INDEX idx_contacts_stage ON public.contacts(stage);
 CREATE INDEX idx_contacts_subscription_date ON public.contacts(subscription_date);
-CREATE INDEX idx_contacts_sent_link ON public.contacts(sent_link);
-CREATE INDEX idx_contacts_clicked_link ON public.contacts(clicked_link);  
-CREATE INDEX idx_contacts_booked ON public.contacts(booked);
-CREATE INDEX idx_contacts_bought_package ON public.contacts(bought_package);
+CREATE INDEX idx_contacts_sent_link ON public.contacts(SENT_LINK);
+CREATE INDEX idx_contacts_clicked_link ON public.contacts(CLICKED_LINK);  
+CREATE INDEX idx_contacts_booked ON public.contacts(BOOKED);
+CREATE INDEX idx_contacts_bought_package ON public.contacts(BOUGHT_PACKAGE);
 CREATE INDEX idx_contacts_ig_or_fb ON public.contacts(ig_or_fb);
 CREATE INDEX idx_contacts_paid_vs_organic ON public.contacts(paid_vs_organic);
 CREATE INDEX idx_contacts_ab_test ON public.contacts(ab_test_tags);
+CREATE INDEX idx_contacts_thread_id ON public.contacts(thread_id);
 
 -- Function to calculate funnel metrics
 CREATE OR REPLACE FUNCTION public.calculate_funnel_metrics()
@@ -90,11 +98,11 @@ RETURNS TABLE (
 WITH counts AS (
   SELECT 
     COUNT(*) AS total_contacts,
-    COUNT(*) FILTER (WHERE sent_link = TRUE) AS sent_link_count,
-    COUNT(*) FILTER (WHERE clicked_link = TRUE) AS clicked_link_count,
-    COUNT(*) FILTER (WHERE booked = TRUE) AS booked_count,
-    COUNT(*) FILTER (WHERE attended = TRUE) AS attended_count,
-    COUNT(*) FILTER (WHERE bought_package = TRUE) AS bought_package_count
+    COUNT(*) FILTER (WHERE SENT_LINK = TRUE) AS sent_link_count,
+    COUNT(*) FILTER (WHERE CLICKED_LINK = TRUE) AS clicked_link_count,
+    COUNT(*) FILTER (WHERE BOOKED = TRUE) AS booked_count,
+    COUNT(*) FILTER (WHERE ATTENDED = TRUE) AS attended_count,
+    COUNT(*) FILTER (WHERE BOUGHT_PACKAGE = TRUE) AS bought_package_count
   FROM public.contacts
 )
 SELECT 'Total Contacts' AS metric_name, 
@@ -142,22 +150,24 @@ $$;
 CREATE OR REPLACE FUNCTION public.update_contact_stage()
 RETURNS TRIGGER AS $$
 BEGIN
-  -- Update stage based on funnel progression
-  IF NEW.bought_package = TRUE THEN
+  -- Update stage based on funnel progression (check booleans in order)
+  IF NEW.BOUGHT_PACKAGE = TRUE THEN
     NEW.stage := 'BOUGHT_PACKAGE';
-  ELSIF NEW.sent_package_link = TRUE THEN
+  ELSIF NEW.SENT_PACKAGE = TRUE THEN
     NEW.stage := 'SENT_PACKAGE';
-  ELSIF NEW.attended = TRUE THEN
+  ELSIF NEW.ATTENDED = TRUE THEN
     NEW.stage := 'ATTENDED';
-  ELSIF NEW.booked = TRUE THEN
+  ELSIF NEW.BOOKED = TRUE THEN
     NEW.stage := 'BOOKED';
-  ELSIF NEW.clicked_link = TRUE THEN
+  ELSIF NEW.READY_TO_BOOK = TRUE THEN
+    NEW.stage := 'READY_TO_BOOK';
+  ELSIF NEW.CLICKED_LINK = TRUE THEN
     NEW.stage := 'CLICKED_LINK';
-  ELSIF NEW.sent_link = TRUE THEN
+  ELSIF NEW.SENT_LINK = TRUE THEN
     NEW.stage := 'SENT_LINK';
-  ELSIF NEW.has_symptoms_value = TRUE OR NEW.has_months_value = TRUE THEN
+  ELSIF NEW.LEAD = TRUE OR NEW.has_symptoms_value = TRUE OR NEW.has_months_value = TRUE THEN
     NEW.stage := 'LEAD';  -- They answered symptoms or months questions
-  ELSIF NEW.email_address IS NOT NULL OR NEW.phone_number IS NOT NULL THEN
+  ELSIF NEW.LEAD_CONTACT = TRUE OR NEW.email_address IS NOT NULL OR NEW.phone_number IS NOT NULL THEN
     NEW.stage := 'LEAD_CONTACT';  -- We have their contact info
   ELSIF NEW.user_id IS NOT NULL THEN
     NEW.stage := 'UNKNOWN_OUTBOUND';
@@ -187,11 +197,11 @@ SELECT
   paid_vs_organic as source,
   ab_test_tags,
   COUNT(*) as total_contacts,
-  COUNT(*) FILTER (WHERE sent_link = TRUE) as sent_link_count,
-  COUNT(*) FILTER (WHERE clicked_link = TRUE) as clicked_link_count,
-  COUNT(*) FILTER (WHERE booked = TRUE) as booked_count,
-  COUNT(*) FILTER (WHERE attended = TRUE) as attended_count,
-  COUNT(*) FILTER (WHERE bought_package = TRUE) as bought_package_count,
+  COUNT(*) FILTER (WHERE SENT_LINK = TRUE) as sent_link_count,
+  COUNT(*) FILTER (WHERE CLICKED_LINK = TRUE) as clicked_link_count,
+  COUNT(*) FILTER (WHERE BOOKED = TRUE) as booked_count,
+  COUNT(*) FILTER (WHERE ATTENDED = TRUE) as attended_count,
+  COUNT(*) FILTER (WHERE BOUGHT_PACKAGE = TRUE) as bought_package_count,
   SUM(total_purchased) as revenue
 FROM public.contacts
 GROUP BY 1, 2, 3, 4
