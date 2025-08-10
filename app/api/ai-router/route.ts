@@ -17,17 +17,29 @@ const openai = new OpenAI({
 export async function POST(request: NextRequest) {
   try {
     const body = await request.json();
-    const { 
-      subscriber_id, 
-      message, 
-      channel = 'ig', 
-      profile = {}, 
-      tags = [] 
-    } = body;
+    
+    // Handle ManyChat's actual format - they send the user data directly
+    const subscriber_id = body.id || body.subscriber_id;
+    const message = body.last_input_text || body.message || 'Hello';
+    const channel = body.ig_id ? 'ig' : 'fb';
+    
+    // Extract profile info from ManyChat format
+    const profile = {
+      name: body.name || body.full_name,
+      first_name: body.first_name,
+      last_name: body.last_name,
+      email: body.email,
+      phone: body.phone,
+      username: body.ig_username
+    };
+    
+    // Extract custom fields
+    const customFields = body.custom_fields || {};
+    const tags = customFields['All Tags'] || [];
 
-    console.log('ManyChat webhook received:', { subscriber_id, message, channel, tags });
+    console.log('ManyChat webhook received:', { subscriber_id, message, channel, profile });
 
-    if (!subscriber_id || !message) {
+    if (!subscriber_id) {
       return NextResponse.json(
         { error: 'Missing required fields' },
         { status: 400 }
@@ -112,6 +124,10 @@ export async function POST(request: NextRequest) {
       total_messages: conversationHistory.filter((m: any) => m.role === 'user').length,
       last_mc_interaction_at: now,
       updated_at: now,
+      // Store custom fields for later use
+      symptoms: customFields['Symptoms'] || null,
+      months_postpartum: customFields['Months Postpartum'] ? parseInt(customFields['Months Postpartum']) : null,
+      objections_json: customFields['Objections'] ? { objections: customFields['Objections'] } : null,
     };
 
     // Set timestamps based on progression
