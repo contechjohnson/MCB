@@ -83,6 +83,8 @@ export async function POST(request: NextRequest) {
       // Funnel progression from MCB fields (exact column names)
       LEAD_CONTACT: customFields['MCB_LEAD_CONTACT'] === true || customFields['MCB_LEAD_CONTACT'] === 'true',
       LEAD: customFields['MCB_LEAD'] === true || customFields['MCB_LEAD'] === 'true',
+      SENT_EMAIL_MAGNET: customFields['MCB_SENT_EMAIL_MAGNET'] === true || customFields['MCB_SENT_EMAIL_MAGNET'] === 'true',
+      OPENED_EMAIL_MAGNET: customFields['MCB_OPENED_EMAIL_MAGNET'] === true || customFields['MCB_OPENED_EMAIL_MAGNET'] === 'true',
       SENT_LINK: customFields['MCB_SENT_LINK'] === true || customFields['MCB_SENT_LINK'] === 'true',
       CLICKED_LINK: customFields['MCB_CLICKED_LINK'] === true || customFields['MCB_CLICKED_LINK'] === 'true',
       READY_TO_BOOK: customFields['MCB_READY_TO_BOOK'] === true || customFields['MCB_READY_TO_BOOK'] === 'true',

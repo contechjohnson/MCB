@@ -36,6 +36,8 @@ The MCB system uses a single `contacts` table to track all user interactions, fu
 These match ManyChat's MCB custom fields exactly:
 - `LEAD_CONTACT` (BOOLEAN) - Have contact info (email/phone)
 - `LEAD` (BOOLEAN) - Answered symptom/months questions
+- `SENT_EMAIL_MAGNET` (BOOLEAN) - Lead magnet email sent
+- `OPENED_EMAIL_MAGNET` (BOOLEAN) - Lead magnet email opened
 - `SENT_LINK` (BOOLEAN) - Booking link sent
 - `CLICKED_LINK` (BOOLEAN) - Clicked the booking link
 - `READY_TO_BOOK` (BOOLEAN) - Ready to book (manual flag)
@@ -97,6 +99,8 @@ The webhook at `/api/ai-router` maps ManyChat custom fields to database columns:
 ```
 MCB_LEAD_CONTACT → LEAD_CONTACT
 MCB_LEAD → LEAD
+MCB_SENT_EMAIL_MAGNET → SENT_EMAIL_MAGNET
+MCB_OPENED_EMAIL_MAGNET → OPENED_EMAIL_MAGNET
 MCB_SENT_LINK → SENT_LINK
 MCB_CLICKED_LINK → CLICKED_LINK
 MCB_READY_TO_BOOK → READY_TO_BOOK
