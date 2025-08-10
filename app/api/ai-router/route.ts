@@ -123,7 +123,31 @@ export async function POST(request: NextRequest) {
       .eq('user_id', user_id)
       .single();
 
-    if (!existingContact) {
+    if (existingContact) {
+      // Merge with existing data - only update fields that have new values
+      // Keep existing boolean values unless explicitly set to true in new data
+      contactData.lead_contact = contactData.lead_contact || existingContact.lead_contact;
+      contactData.lead = contactData.lead || existingContact.lead;
+      contactData.sent_email_magnet = contactData.sent_email_magnet || existingContact.sent_email_magnet;
+      contactData.opened_email_magnet = contactData.opened_email_magnet || existingContact.opened_email_magnet;
+      contactData.sent_link = contactData.sent_link || existingContact.sent_link;
+      contactData.clicked_link = contactData.clicked_link || existingContact.clicked_link;
+      contactData.ready_to_book = contactData.ready_to_book || existingContact.ready_to_book;
+      contactData.booked = contactData.booked || existingContact.booked;
+      contactData.attended = contactData.attended || existingContact.attended;
+      contactData.sent_package = contactData.sent_package || existingContact.sent_package;
+      contactData.bought_package = contactData.bought_package || existingContact.bought_package;
+      
+      // Keep existing values if new ones are null
+      contactData.symptoms = contactData.symptoms || existingContact.symptoms;
+      contactData.months_pp = contactData.months_pp || existingContact.months_pp;
+      contactData.objections = contactData.objections || existingContact.objections;
+      contactData.summary = existingContact.summary; // Always preserve summary unless explicitly updating
+      contactData.summary_updated_at = existingContact.summary_updated_at;
+      
+      // Keep creation date
+      contactData.created_at = existingContact.created_at;
+    } else {
       contactData.created_at = new Date().toISOString();
     }
 
