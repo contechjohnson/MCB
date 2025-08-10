@@ -80,18 +80,18 @@ export async function POST(request: NextRequest) {
       has_symptoms_value: !!(customFields['Symptoms'] || customFields['Issues']),
       has_months_value: !!customFields['Months Postpartum'],
       
-      // Funnel progression from MCB fields (exact column names)
-      LEAD_CONTACT: customFields['MCB_LEAD_CONTACT'] === true || customFields['MCB_LEAD_CONTACT'] === 'true',
-      LEAD: customFields['MCB_LEAD'] === true || customFields['MCB_LEAD'] === 'true',
-      SENT_EMAIL_MAGNET: customFields['MCB_SENT_EMAIL_MAGNET'] === true || customFields['MCB_SENT_EMAIL_MAGNET'] === 'true',
-      OPENED_EMAIL_MAGNET: customFields['MCB_OPENED_EMAIL_MAGNET'] === true || customFields['MCB_OPENED_EMAIL_MAGNET'] === 'true',
-      SENT_LINK: customFields['MCB_SENT_LINK'] === true || customFields['MCB_SENT_LINK'] === 'true',
-      CLICKED_LINK: customFields['MCB_CLICKED_LINK'] === true || customFields['MCB_CLICKED_LINK'] === 'true',
-      READY_TO_BOOK: customFields['MCB_READY_TO_BOOK'] === true || customFields['MCB_READY_TO_BOOK'] === 'true',
-      BOOKED: customFields['MCB_BOOKED'] === true || customFields['MCB_BOOKED'] === 'true',
-      ATTENDED: customFields['MCB_ATTENDED'] === true || customFields['MCB_ATTENDED'] === 'true',
-      SENT_PACKAGE: customFields['MCB_SENT_PACKAGE'] === true || customFields['MCB_SENT_PACKAGE'] === 'true',
-      BOUGHT_PACKAGE: customFields['MCB_BOUGHT_PACKAGE'] === true || customFields['MCB_BOUGHT_PACKAGE'] === 'true',
+      // Funnel progression from MCB fields (lowercase for PostgreSQL)
+      lead_contact: customFields['MCB_LEAD_CONTACT'] === true || customFields['MCB_LEAD_CONTACT'] === 'true',
+      lead: customFields['MCB_LEAD'] === true || customFields['MCB_LEAD'] === 'true',
+      sent_email_magnet: customFields['MCB_SENT_EMAIL_MAGNET'] === true || customFields['MCB_SENT_EMAIL_MAGNET'] === 'true',
+      opened_email_magnet: customFields['MCB_OPENED_EMAIL_MAGNET'] === true || customFields['MCB_OPENED_EMAIL_MAGNET'] === 'true',
+      sent_link: customFields['MCB_SENT_LINK'] === true || customFields['MCB_SENT_LINK'] === 'true',
+      clicked_link: customFields['MCB_CLICKED_LINK'] === true || customFields['MCB_CLICKED_LINK'] === 'true',
+      ready_to_book: customFields['MCB_READY_TO_BOOK'] === true || customFields['MCB_READY_TO_BOOK'] === 'true',
+      booked: customFields['MCB_BOOKED'] === true || customFields['MCB_BOOKED'] === 'true',
+      attended: customFields['MCB_ATTENDED'] === true || customFields['MCB_ATTENDED'] === 'true',
+      sent_package: customFields['MCB_SENT_PACKAGE'] === true || customFields['MCB_SENT_PACKAGE'] === 'true',
+      bought_package: customFields['MCB_BOUGHT_PACKAGE'] === true || customFields['MCB_BOUGHT_PACKAGE'] === 'true',
       
       // Summary field (will be populated later via thread query)
       summary: null,
