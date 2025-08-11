@@ -1,0 +1,18 @@
+{
+  "functions": {
+    "app/dashboard/page.tsx": {
+      "maxDuration": 30
+    }
+  },
+  "headers": [
+    {
+      "source": "/dashboard",
+      "headers": [
+        {
+          "key": "Cache-Control",
+          "value": "s-maxage=1, stale-while-revalidate"
+        }
+      ]
+    }
+  ]
+}
