@@ -1,301 +1,317 @@
 import { createClient } from '@supabase/supabase-js';
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
+import { Badge } from '@/components/ui/badge';
+import { Progress } from '@/components/ui/progress';
 
 const supabase = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_URL!,
   process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
 );
 
-// Funnel stage configuration with proper order
-const FUNNEL_STAGES = [
-  { key: 'total', label: 'Total Contacts', color: 'bg-gray-200' },
-  { key: 'lead_contact', label: 'Lead Contact', color: 'bg-blue-200' },
-  { key: 'lead', label: 'Lead (Info)', color: 'bg-blue-300' },
-  { key: 'sent_link', label: 'Sent Link', color: 'bg-indigo-300' },
-  { key: 'clicked_link', label: 'Clicked Link', color: 'bg-indigo-400' },
-  { key: 'booked', label: 'Booked', color: 'bg-purple-400' },
-  { key: 'attended', label: 'Attended', color: 'bg-purple-500' },
-  { key: 'sent_package', label: 'Sent Package', color: 'bg-pink-400' },
-  { key: 'bought_package', label: 'Bought Package', color: 'bg-green-500' },
-];
+async function getDashboardData() {
+  // Get all contacts for funnel calculation
+  const { data: contacts } = await supabase
+    .from('contacts')
+    .select('*')
+    .order('updated_at', { ascending: false });
 
-async function getFunnelData() {
-  // Get current month data
+  // Calculate funnel metrics
+  const metrics = {
+    total: contacts?.length || 0,
+    leadContact: contacts?.filter(c => c.lead_contact).length || 0,
+    lead: contacts?.filter(c => c.lead).length || 0,
+    sentLink: contacts?.filter(c => c.sent_link).length || 0,
+    clickedLink: contacts?.filter(c => c.clicked_link).length || 0,
+    booked: contacts?.filter(c => c.booked).length || 0,
+    attended: contacts?.filter(c => c.attended).length || 0,
+    sentPackage: contacts?.filter(c => c.sent_package).length || 0,
+    boughtPackage: contacts?.filter(c => c.bought_package).length || 0,
+  };
+
+  // Get hot leads (actionable contacts)
+  const hotLeads = contacts?.filter(c => 
+    (c.lead_contact || c.lead || c.sent_link || c.clicked_link || c.booked || c.attended) &&
+    !c.bought_package
+  ).slice(0, 10) || [];
+
+  // Calculate revenue
+  const totalRevenue = contacts?.reduce((sum, c) => sum + (c.total_purchased || 0), 0) || 0;
+
+  // Get month-over-month data
   const now = new Date();
   const startOfMonth = new Date(now.getFullYear(), now.getMonth(), 1);
   const startOfLastMonth = new Date(now.getFullYear(), now.getMonth() - 1, 1);
-  const endOfLastMonth = new Date(now.getFullYear(), now.getMonth(), 0);
-
-  // Current month funnel
-  const { data: currentMonth } = await supabase
-    .from('contacts')
-    .select('*')
-    .gte('created_at', startOfMonth.toISOString());
-
-  // Last month funnel  
-  const { data: lastMonth } = await supabase
-    .from('contacts')
-    .select('*')
-    .gte('created_at', startOfLastMonth.toISOString())
-    .lte('created_at', endOfLastMonth.toISOString());
-
-  // Calculate funnel metrics
-  const calculateFunnel = (contacts: any[]) => {
-    if (!contacts) return {};
-    return {
-      total: contacts.length,
-      lead_contact: contacts.filter(c => c.lead_contact).length,
-      lead: contacts.filter(c => c.lead).length,
-      sent_link: contacts.filter(c => c.sent_link).length,
-      clicked_link: contacts.filter(c => c.clicked_link).length,
-      booked: contacts.filter(c => c.booked).length,
-      attended: contacts.filter(c => c.attended).length,
-      sent_package: contacts.filter(c => c.sent_package).length,
-      bought_package: contacts.filter(c => c.bought_package).length,
-    };
-  };
+  
+  const thisMonthContacts = contacts?.filter(c => 
+    new Date(c.created_at) >= startOfMonth
+  ).length || 0;
+  
+  const lastMonthContacts = contacts?.filter(c => {
+    const created = new Date(c.created_at);
+    return created >= startOfLastMonth && created < startOfMonth;
+  }).length || 0;
 
   return {
-    current: calculateFunnel(currentMonth || []),
-    last: calculateFunnel(lastMonth || []),
+    metrics,
+    hotLeads,
+    totalRevenue,
+    thisMonthContacts,
+    lastMonthContacts,
   };
 }
 
-async function getHotLeads() {
-  // Get contacts in the "actionable" stages (lead_contact through attended)
-  const { data: hotLeads } = await supabase
-    .from('contacts')
-    .select('user_id, first_name, last_name, email_address, phone_number, stage, updated_at, summary')
-    .or('lead_contact.eq.true,lead.eq.true,sent_link.eq.true,clicked_link.eq.true,booked.eq.true,attended.eq.true')
-    .not('bought_package', 'eq', true)
-    .order('updated_at', { ascending: false })
-    .limit(10);
-
-  return hotLeads || [];
-}
-
-async function getTotalRevenue() {
-  const { data } = await supabase
-    .from('contacts')
-    .select('total_purchased');
-
-  const total = data?.reduce((sum, contact) => sum + (contact.total_purchased || 0), 0) || 0;
-  return total;
-}
-
-// Funnel Visualization Component - Horizontal Bars
-function FunnelChart({ data, lastMonth }: { data: any; lastMonth: any }) {
-  const maxValue = data.total || 1;
+// Funnel Item Component
+function FunnelItem({ 
+  label, 
+  value, 
+  total, 
+  prevValue 
+}: { 
+  label: string; 
+  value: number; 
+  total: number; 
+  prevValue?: number;
+}) {
+  const percentage = total > 0 ? (value / total) * 100 : 0;
+  const conversionRate = prevValue && prevValue > 0 ? (value / prevValue) * 100 : 0;
 
   return (
-    <div className="space-y-4">
-      {FUNNEL_STAGES.map((stage, index) => {
-        const value = data[stage.key] || 0;
-        const lastValue = lastMonth[stage.key] || 0;
-        const percentage = maxValue > 0 ? (value / maxValue) * 100 : 0;
-        const change = lastValue > 0 ? ((value - lastValue) / lastValue * 100) : 0;
-        
-        // Calculate conversion rate from previous stage
-        const prevStageKey = index > 0 ? FUNNEL_STAGES[index - 1].key : null;
-        const prevValue = prevStageKey ? (data[prevStageKey] || 0) : 0;
-        const conversionRate = prevValue > 0 ? ((value / prevValue) * 100) : 0;
-
-        return (
-          <div key={stage.key} className="relative">
-            <div className="flex items-center justify-between mb-2">
-              <span className="text-sm font-medium text-gray-700">{stage.label}</span>
-              <div className="flex items-center gap-3">
-                <span className="text-sm font-bold text-gray-900">{value}</span>
-                {index > 0 && prevValue > 0 && (
-                  <span className="text-xs text-gray-500">
-                    {conversionRate.toFixed(0)}% of prev
-                  </span>
-                )}
-                {change !== 0 && (
-                  <span className={`text-xs font-medium ${change > 0 ? 'text-green-600' : 'text-red-600'}`}>
-                    {change > 0 ? '↑' : '↓'} {Math.abs(change).toFixed(0)}%
-                  </span>
-                )}
-              </div>
-            </div>
-            <div className="w-full bg-gray-100 rounded-full h-8 overflow-hidden">
-              <div 
-                className={`h-full ${stage.color} transition-all duration-700 ease-out`}
-                style={{ width: `${percentage}%`, minWidth: value > 0 ? '40px' : '0' }}
-              />
-            </div>
-          </div>
-        );
-      })}
+    <div className="space-y-2">
+      <div className="flex items-center justify-between">
+        <span className="text-sm font-medium">{label}</span>
+        <div className="flex items-center gap-4">
+          <span className="text-sm font-bold">{value}</span>
+          {conversionRate > 0 && (
+            <span className="text-xs text-gray-500">
+              {conversionRate.toFixed(0)}% of prev
+            </span>
+          )}
+        </div>
+      </div>
+      <Progress value={percentage} max={100} />
     </div>
   );
 }
 
-// Stage Badge Component  
-function StageBadge({ stage }: { stage: string }) {
-  const colors: Record<string, string> = {
-    'LEAD_CONTACT': 'bg-blue-100 text-blue-800',
-    'LEAD': 'bg-blue-200 text-blue-900',
-    'SENT_LINK': 'bg-indigo-100 text-indigo-800',
-    'CLICKED_LINK': 'bg-indigo-200 text-indigo-900',
-    'READY_TO_BOOK': 'bg-purple-100 text-purple-800',
-    'BOOKED': 'bg-purple-100 text-purple-800',
-    'ATTENDED': 'bg-purple-200 text-purple-900',
+// Contact Card Component
+function ContactCard({ contact }: { contact: any }) {
+  const getStageVariant = (stage: string) => {
+    if (stage === 'BOOKED' || stage === 'ATTENDED') return 'default';
+    if (stage === 'SENT_LINK' || stage === 'CLICKED_LINK') return 'secondary';
+    return 'outline';
   };
 
-  const displayName = stage.replace(/_/g, ' ').toLowerCase()
-    .replace(/\b\w/g, (l) => l.toUpperCase());
-
   return (
-    <span className={`px-2.5 py-1 text-xs font-medium rounded-full ${colors[stage] || 'bg-gray-100 text-gray-800'}`}>
-      {displayName}
-    </span>
-  );
-}
-
-export default async function DashboardPage() {
-  const funnelData = await getFunnelData();
-  const hotLeads = await getHotLeads();
-  const totalRevenue = await getTotalRevenue();
-
-  // Calculate key metrics
-  const conversionRate = funnelData.current.total > 0 
-    ? ((funnelData.current.bought_package / funnelData.current.total) * 100)
-    : 0;
-    
-  const bookingRate = funnelData.current.sent_link > 0
-    ? ((funnelData.current.booked / funnelData.current.sent_link) * 100)
-    : 0;
-
-  return (
-    <div className="min-h-screen bg-white">
-      <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
-        {/* Minimal Header */}
-        <div className="mb-10">
-          <h1 className="text-2xl font-semibold text-gray-900">Funnel Dashboard</h1>
-        </div>
-
-        {/* Key Metrics - Minimal Cards */}
-        <div className="grid grid-cols-1 md:grid-cols-4 gap-4 mb-10">
-          <div className="bg-gray-50 rounded-lg p-4">
-            <p className="text-xs font-medium text-gray-500 uppercase tracking-wider">Revenue</p>
-            <p className="mt-1 text-2xl font-semibold text-gray-900">
-              ${totalRevenue.toLocaleString()}
+    <div className="border border-gray-200 rounded-lg p-4 hover:border-gray-400 transition-colors">
+      <div className="flex items-start justify-between gap-2">
+        <div className="flex-1">
+          <div className="flex items-center gap-2">
+            <p className="font-semibold text-sm">
+              {contact.first_name} {contact.last_name}
             </p>
+            <Badge variant={getStageVariant(contact.stage)}>
+              {contact.stage?.replace(/_/g, ' ')}
+            </Badge>
           </div>
-          <div className="bg-gray-50 rounded-lg p-4">
-            <p className="text-xs font-medium text-gray-500 uppercase tracking-wider">Conversion</p>
-            <p className="mt-1 text-2xl font-semibold text-gray-900">
-              {conversionRate.toFixed(1)}%
-            </p>
-          </div>
-          <div className="bg-gray-50 rounded-lg p-4">
-            <p className="text-xs font-medium text-gray-500 uppercase tracking-wider">Booking Rate</p>
-            <p className="mt-1 text-2xl font-semibold text-gray-900">
-              {bookingRate.toFixed(1)}%
-            </p>
-          </div>
-          <div className="bg-gray-50 rounded-lg p-4">
-            <p className="text-xs font-medium text-gray-500 uppercase tracking-wider">Hot Leads</p>
-            <p className="mt-1 text-2xl font-semibold text-gray-900">
-              {hotLeads.length}
-            </p>
-          </div>
-        </div>
-
-        <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
-          {/* Funnel Visualization - Clean Design */}
-          <div className="bg-white border border-gray-200 rounded-lg p-6">
-            <div className="mb-6">
-              <h2 className="text-lg font-medium text-gray-900">Funnel Performance</h2>
-              <p className="mt-1 text-sm text-gray-500">
-                Month-over-month comparison
-              </p>
-            </div>
-            <FunnelChart data={funnelData.current} lastMonth={funnelData.last} />
-          </div>
-
-          {/* Hot Leads List - Action Focused */}
-          <div className="bg-white border border-gray-200 rounded-lg p-6">
-            <div className="mb-6">
-              <h2 className="text-lg font-medium text-gray-900">Action Required</h2>
-              <p className="mt-1 text-sm text-gray-500">
-                Contacts ready for outreach
-              </p>
-            </div>
-            <div className="space-y-3 max-h-[480px] overflow-y-auto">
-              {hotLeads.length === 0 ? (
-                <p className="text-sm text-gray-500 text-center py-8">
-                  No hot leads at the moment
-                </p>
-              ) : (
-                hotLeads.map((lead) => (
-                  <div 
-                    key={lead.user_id} 
-                    className="border border-gray-100 rounded-lg p-4 hover:bg-gray-50 transition-colors"
-                  >
-                    <div className="flex justify-between items-start gap-4">
-                      <div className="flex-1 min-w-0">
-                        <div className="flex items-center gap-2 mb-1">
-                          <p className="font-medium text-gray-900 truncate">
-                            {lead.first_name} {lead.last_name}
-                          </p>
-                          <StageBadge stage={lead.stage} />
-                        </div>
-                        {lead.email_address && (
-                          <p className="text-sm text-gray-600 truncate">
-                            ✉ {lead.email_address}
-                          </p>
-                        )}
-                        {lead.phone_number && (
-                          <p className="text-sm text-gray-600">
-                            ☎ {lead.phone_number}
-                          </p>
-                        )}
-                        {lead.summary && (
-                          <p className="text-xs text-gray-500 mt-2 line-clamp-2">
-                            {lead.summary}
-                          </p>
-                        )}
-                      </div>
-                    </div>
-                  </div>
-                ))
-              )}
-            </div>
-          </div>
-        </div>
-
-        {/* Month Comparison Summary */}
-        <div className="mt-8 bg-gray-50 rounded-lg p-6">
-          <h3 className="text-sm font-medium text-gray-700 mb-3">Month-over-Month Summary</h3>
-          <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-            {[
-              { label: 'New Contacts', current: funnelData.current.total, last: funnelData.last.total },
-              { label: 'Bookings', current: funnelData.current.booked, last: funnelData.last.booked },
-              { label: 'Attended', current: funnelData.current.attended, last: funnelData.last.attended },
-              { label: 'Purchases', current: funnelData.current.bought_package, last: funnelData.last.bought_package },
-            ].map((metric) => {
-              const change = metric.last > 0 
-                ? ((metric.current - metric.last) / metric.last * 100)
-                : 0;
-              
-              return (
-                <div key={metric.label}>
-                  <p className="text-xs text-gray-500">{metric.label}</p>
-                  <div className="flex items-baseline gap-2 mt-1">
-                    <span className="text-lg font-semibold text-gray-900">
-                      {metric.current}
-                    </span>
-                    <span className={`text-xs ${change > 0 ? 'text-green-600' : change < 0 ? 'text-red-600' : 'text-gray-400'}`}>
-                      {change > 0 ? '+' : ''}{change.toFixed(0)}%
-                    </span>
-                  </div>
-                </div>
-              );
-            })}
-          </div>
+          {contact.email_address && (
+            <p className="text-xs text-gray-600 mt-1">{contact.email_address}</p>
+          )}
+          {contact.phone_number && (
+            <p className="text-xs text-gray-600">{contact.phone_number}</p>
+          )}
         </div>
       </div>
     </div>
   );
-}// Force redeploy Sun Aug 10 22:32:46 MDT 2025
+}
+
+export default async function DashboardPage() {
+  const { metrics, hotLeads, totalRevenue, thisMonthContacts, lastMonthContacts } = 
+    await getDashboardData();
+
+  const conversionRate = metrics.total > 0 
+    ? (metrics.boughtPackage / metrics.total * 100).toFixed(1)
+    : '0';
+
+  const monthGrowth = lastMonthContacts > 0 
+    ? ((thisMonthContacts - lastMonthContacts) / lastMonthContacts * 100).toFixed(0)
+    : '0';
+
+  return (
+    <div className="min-h-screen bg-white p-4 md:p-8">
+      <div className="max-w-7xl mx-auto space-y-8">
+        {/* Header */}
+        <div className="border-b border-gray-200 pb-4">
+          <h1 className="text-3xl font-bold">Dashboard</h1>
+          <p className="text-gray-600 mt-1">Real-time funnel analytics</p>
+        </div>
+
+        {/* KPI Cards */}
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+          <Card>
+            <CardHeader className="pb-3">
+              <CardDescription>Total Revenue</CardDescription>
+              <CardTitle className="text-2xl">${totalRevenue.toLocaleString()}</CardTitle>
+            </CardHeader>
+          </Card>
+          <Card>
+            <CardHeader className="pb-3">
+              <CardDescription>Conversion Rate</CardDescription>
+              <CardTitle className="text-2xl">{conversionRate}%</CardTitle>
+            </CardHeader>
+          </Card>
+          <Card>
+            <CardHeader className="pb-3">
+              <CardDescription>This Month</CardDescription>
+              <CardTitle className="text-2xl">
+                {thisMonthContacts}
+                {monthGrowth !== '0' && (
+                  <span className="text-sm font-normal text-gray-500 ml-2">
+                    {monthGrowth > '0' ? '+' : ''}{monthGrowth}%
+                  </span>
+                )}
+              </CardTitle>
+            </CardHeader>
+          </Card>
+          <Card>
+            <CardHeader className="pb-3">
+              <CardDescription>Active Leads</CardDescription>
+              <CardTitle className="text-2xl">{hotLeads.length}</CardTitle>
+            </CardHeader>
+          </Card>
+        </div>
+
+        {/* Main Content */}
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+          {/* Funnel Visualization */}
+          <Card>
+            <CardHeader>
+              <CardTitle>Funnel Performance</CardTitle>
+              <CardDescription>Conversion through each stage</CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-6">
+              <FunnelItem 
+                label="Total Contacts" 
+                value={metrics.total} 
+                total={metrics.total}
+              />
+              <FunnelItem 
+                label="Lead Contact" 
+                value={metrics.leadContact} 
+                total={metrics.total}
+                prevValue={metrics.total}
+              />
+              <FunnelItem 
+                label="Lead (Info Captured)" 
+                value={metrics.lead} 
+                total={metrics.total}
+                prevValue={metrics.leadContact}
+              />
+              <FunnelItem 
+                label="Sent Link" 
+                value={metrics.sentLink} 
+                total={metrics.total}
+                prevValue={metrics.lead}
+              />
+              <FunnelItem 
+                label="Clicked Link" 
+                value={metrics.clickedLink} 
+                total={metrics.total}
+                prevValue={metrics.sentLink}
+              />
+              <FunnelItem 
+                label="Booked" 
+                value={metrics.booked} 
+                total={metrics.total}
+                prevValue={metrics.clickedLink}
+              />
+              <FunnelItem 
+                label="Attended" 
+                value={metrics.attended} 
+                total={metrics.total}
+                prevValue={metrics.booked}
+              />
+              <FunnelItem 
+                label="Sent Package" 
+                value={metrics.sentPackage} 
+                total={metrics.total}
+                prevValue={metrics.attended}
+              />
+              <FunnelItem 
+                label="Bought Package" 
+                value={metrics.boughtPackage} 
+                total={metrics.total}
+                prevValue={metrics.sentPackage}
+              />
+            </CardContent>
+          </Card>
+
+          {/* Hot Leads */}
+          <Card>
+            <CardHeader>
+              <CardTitle>Hot Leads</CardTitle>
+              <CardDescription>Contacts ready for outreach</CardDescription>
+            </CardHeader>
+            <CardContent>
+              <div className="space-y-3 max-h-[600px] overflow-y-auto">
+                {hotLeads.length === 0 ? (
+                  <p className="text-center text-gray-500 py-8">
+                    No active leads at the moment
+                  </p>
+                ) : (
+                  hotLeads.map((contact: any) => (
+                    <ContactCard key={contact.user_id} contact={contact} />
+                  ))
+                )}
+              </div>
+            </CardContent>
+          </Card>
+        </div>
+
+        {/* Bottom Stats */}
+        <Card>
+          <CardHeader>
+            <CardTitle>Quick Stats</CardTitle>
+            <CardDescription>Key performance indicators</CardDescription>
+          </CardHeader>
+          <CardContent>
+            <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+              <div>
+                <p className="text-xs text-gray-500">Lead Capture Rate</p>
+                <p className="text-xl font-bold">
+                  {metrics.total > 0 
+                    ? (metrics.lead / metrics.total * 100).toFixed(0)
+                    : 0}%
+                </p>
+              </div>
+              <div>
+                <p className="text-xs text-gray-500">Booking Rate</p>
+                <p className="text-xl font-bold">
+                  {metrics.sentLink > 0 
+                    ? (metrics.booked / metrics.sentLink * 100).toFixed(0)
+                    : 0}%
+                </p>
+              </div>
+              <div>
+                <p className="text-xs text-gray-500">Show Rate</p>
+                <p className="text-xl font-bold">
+                  {metrics.booked > 0 
+                    ? (metrics.attended / metrics.booked * 100).toFixed(0)
+                    : 0}%
+                </p>
+              </div>
+              <div>
+                <p className="text-xs text-gray-500">Close Rate</p>
+                <p className="text-xl font-bold">
+                  {metrics.attended > 0 
+                    ? (metrics.boughtPackage / metrics.attended * 100).toFixed(0)
+                    : 0}%
+                </p>
+              </div>
+            </div>
+          </CardContent>
+        </Card>
+      </div>
+    </div>
+  );
+}
