@@ -2,18 +2,26 @@ import { createClient } from '@supabase/supabase-js';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Progress } from '@/components/ui/progress';
+import { DateFilter } from './date-filter';
+import { TrendChart } from './trend-chart';
 
 const supabase = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_URL!,
   process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
 );
 
-async function getDashboardData() {
-  // Get all contacts for funnel calculation
-  const { data: contacts } = await supabase
-    .from('contacts')
-    .select('*')
-    .order('updated_at', { ascending: false });
+async function getDashboardData(startDate?: string, endDate?: string) {
+  // Build query
+  let query = supabase.from('contacts').select('*');
+  
+  // Apply date filters if provided
+  if (startDate && endDate) {
+    query = query
+      .gte('created_at', startDate)
+      .lte('created_at', endDate + 'T23:59:59');
+  }
+  
+  const { data: contacts } = await query.order('updated_at', { ascending: false });
 
   // Calculate funnel metrics
   const metrics = {
@@ -51,12 +59,37 @@ async function getDashboardData() {
     return created >= startOfLastMonth && created < startOfMonth;
   }).length || 0;
 
+  // Get monthly trend data (last 6 months)
+  const monthlyData = [];
+  for (let i = 5; i >= 0; i--) {
+    const monthStart = new Date(now.getFullYear(), now.getMonth() - i, 1);
+    const monthEnd = new Date(now.getFullYear(), now.getMonth() - i + 1, 0);
+    
+    const { data: monthContacts } = await supabase
+      .from('contacts')
+      .select('*')
+      .gte('created_at', monthStart.toISOString())
+      .lte('created_at', monthEnd.toISOString());
+    
+    if (monthContacts) {
+      monthlyData.push({
+        month: monthStart.toLocaleDateString('en-US', { month: 'short' }),
+        total: monthContacts.length,
+        lead: monthContacts.filter(c => c.lead).length,
+        booked: monthContacts.filter(c => c.booked).length,
+        attended: monthContacts.filter(c => c.attended).length,
+        bought: monthContacts.filter(c => c.bought_package).length,
+      });
+    }
+  }
+
   return {
     metrics,
     hotLeads,
     totalRevenue,
     thisMonthContacts,
     lastMonthContacts,
+    monthlyData,
   };
 }
 
@@ -74,7 +107,6 @@ function FunnelItem({
 }) {
   const percentage = total > 0 ? (value / total) * 100 : 0;
   const conversionRate = prevValue && prevValue > 0 ? (value / prevValue) * 100 : 0;
-  const isTotal = label === "Total Contacts";
 
   return (
     <div className="space-y-2">
@@ -89,7 +121,7 @@ function FunnelItem({
           )}
         </div>
       </div>
-      <Progress value={percentage} max={100} className={isTotal ? "gray-bar" : ""} />
+      <Progress value={percentage} max={100} />
     </div>
   );
 }
@@ -126,9 +158,13 @@ function ContactCard({ contact }: { contact: any }) {
   );
 }
 
-export default async function DashboardPage() {
-  const { metrics, hotLeads, totalRevenue, thisMonthContacts, lastMonthContacts } = 
-    await getDashboardData();
+export default async function DashboardPage({ 
+  searchParams 
+}: { 
+  searchParams: { start?: string; end?: string } 
+}) {
+  const { metrics, hotLeads, totalRevenue, thisMonthContacts, lastMonthContacts, monthlyData } = 
+    await getDashboardData(searchParams.start, searchParams.end);
 
   const conversionRate = metrics.total > 0 
     ? (metrics.boughtPackage / metrics.total * 100).toFixed(1)
@@ -138,13 +174,26 @@ export default async function DashboardPage() {
     ? ((thisMonthContacts - lastMonthContacts) / lastMonthContacts * 100).toFixed(0)
     : '0';
 
+  // Show date range in header if filtered
+  const dateRangeText = searchParams.start && searchParams.end 
+    ? ` (${new Date(searchParams.start).toLocaleDateString()} - ${new Date(searchParams.end).toLocaleDateString()})`
+    : '';
+
   return (
     <div className="min-h-screen bg-white p-4 md:p-8">
       <div className="max-w-7xl mx-auto space-y-8">
         {/* Header */}
         <div className="border-b border-gray-200 pb-4">
-          <h1 className="text-3xl font-bold">PPCU</h1>
+          <h1 className="text-3xl font-bold">PPCU{dateRangeText}</h1>
         </div>
+
+        {/* Date Filter */}
+        <DateFilter currentStart={searchParams.start} currentEnd={searchParams.end} />
+
+        {/* Trend Chart */}
+        {!searchParams.start && !searchParams.end && (
+          <TrendChart monthlyData={monthlyData} />
+        )}
 
         {/* KPI Cards */}
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
