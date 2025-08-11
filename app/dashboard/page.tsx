@@ -74,6 +74,7 @@ function FunnelItem({
 }) {
   const percentage = total > 0 ? (value / total) * 100 : 0;
   const conversionRate = prevValue && prevValue > 0 ? (value / prevValue) * 100 : 0;
+  const isTotal = label === "Total Contacts";
 
   return (
     <div className="space-y-2">
@@ -88,7 +89,7 @@ function FunnelItem({
           )}
         </div>
       </div>
-      <Progress value={percentage} max={100} />
+      <Progress value={percentage} max={100} className={isTotal ? "gray-bar" : ""} />
     </div>
   );
 }
@@ -142,8 +143,7 @@ export default async function DashboardPage() {
       <div className="max-w-7xl mx-auto space-y-8">
         {/* Header */}
         <div className="border-b border-gray-200 pb-4">
-          <h1 className="text-3xl font-bold">Dashboard</h1>
-          <p className="text-gray-600 mt-1">Real-time funnel analytics</p>
+          <h1 className="text-3xl font-bold">PPCU</h1>
         </div>
 
         {/* KPI Cards */}
@@ -196,13 +196,13 @@ export default async function DashboardPage() {
                 total={metrics.total}
               />
               <FunnelItem 
-                label="Lead Contact" 
+                label="Lead (Contact Info)" 
                 value={metrics.leadContact} 
                 total={metrics.total}
                 prevValue={metrics.total}
               />
               <FunnelItem 
-                label="Lead (Info Captured)" 
+                label="Lead" 
                 value={metrics.lead} 
                 total={metrics.total}
                 prevValue={metrics.leadContact}
