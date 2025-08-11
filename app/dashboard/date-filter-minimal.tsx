@@ -61,7 +61,7 @@ export function DateFilterMinimal({ currentStart, currentEnd }: { currentStart?:
       {/* Quick month selector - always visible */}
       <select 
         onChange={handleMonthSelect}
-        className="px-3 py-1.5 text-sm border border-gray-300 rounded-md focus:outline-none focus:ring-1 focus:ring-gray-500"
+        className="px-3 py-1.5 text-sm text-gray-900 bg-white border-2 border-gray-900 rounded-md focus:outline-none focus:ring-2 focus:ring-gray-500 font-medium"
         defaultValue=""
       >
         <option value="">Filter by month...</option>
@@ -74,7 +74,7 @@ export function DateFilterMinimal({ currentStart, currentEnd }: { currentStart?:
       {/* Custom date range toggle */}
       <button
         onClick={() => setIsExpanded(!isExpanded)}
-        className="px-3 py-1.5 text-sm border border-gray-300 rounded-md hover:bg-gray-50 transition-colors"
+        className="px-3 py-1.5 text-sm text-gray-900 bg-white border-2 border-gray-900 rounded-md hover:bg-gray-100 transition-colors font-medium"
       >
         Custom Range
       </button>
@@ -83,7 +83,7 @@ export function DateFilterMinimal({ currentStart, currentEnd }: { currentStart?:
       {hasFilter && (
         <button
           onClick={handleReset}
-          className="px-3 py-1.5 text-sm bg-gray-100 rounded-md hover:bg-gray-200 transition-colors flex items-center gap-2"
+          className="px-3 py-1.5 text-sm text-white bg-gray-900 rounded-md hover:bg-gray-800 transition-colors flex items-center gap-2 font-medium"
         >
           <span>Filtered</span>
           <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -94,29 +94,29 @@ export function DateFilterMinimal({ currentStart, currentEnd }: { currentStart?:
 
       {/* Expandable custom date range */}
       {isExpanded && (
-        <div className="flex items-center gap-2 pl-2 border-l border-gray-300">
+        <div className="flex items-center gap-2 pl-2 border-l-2 border-gray-900">
           <input
             type="date"
             value={startDate}
             onChange={(e) => setStartDate(e.target.value)}
-            className="px-2 py-1 text-sm border border-gray-300 rounded-md focus:outline-none focus:ring-1 focus:ring-gray-500"
+            className="px-2 py-1 text-sm text-gray-900 border-2 border-gray-900 rounded-md focus:outline-none focus:ring-2 focus:ring-gray-500 font-medium"
           />
-          <span className="text-sm text-gray-500">to</span>
+          <span className="text-sm text-gray-900 font-medium">to</span>
           <input
             type="date"
             value={endDate}
             onChange={(e) => setEndDate(e.target.value)}
-            className="px-2 py-1 text-sm border border-gray-300 rounded-md focus:outline-none focus:ring-1 focus:ring-gray-500"
+            className="px-2 py-1 text-sm text-gray-900 border-2 border-gray-900 rounded-md focus:outline-none focus:ring-2 focus:ring-gray-500 font-medium"
           />
           <button
             onClick={handleApplyFilter}
-            className="px-3 py-1 text-sm bg-gray-900 text-white rounded-md hover:bg-gray-800 transition-colors"
+            className="px-3 py-1 text-sm bg-gray-900 text-white rounded-md hover:bg-gray-800 transition-colors font-medium"
           >
             Apply
           </button>
           <button
             onClick={() => setIsExpanded(false)}
-            className="px-2 py-1 text-sm text-gray-500 hover:text-gray-700"
+            className="px-2 py-1 text-sm text-gray-700 hover:text-gray-900 font-medium"
           >
             Cancel
           </button>
