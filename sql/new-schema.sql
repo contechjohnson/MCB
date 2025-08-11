@@ -171,10 +171,13 @@ BEGIN
     NEW.stage := 'LEAD';  -- They answered symptoms or months questions
   ELSIF NEW.LEAD_CONTACT = TRUE OR NEW.email_address IS NOT NULL OR NEW.phone_number IS NOT NULL THEN
     NEW.stage := 'LEAD_CONTACT';  -- We have their contact info
-  ELSIF NEW.user_id IS NOT NULL THEN
-    NEW.stage := 'UNKNOWN_OUTBOUND';
+  -- Check if we have names to distinguish between UNKNOWN_OUTBOUND and NO_STAGE
+  ELSIF (NEW.first_name IS NULL AND NEW.last_name IS NULL AND NEW.instagram_name IS NULL AND NEW.facebook_name IS NULL) THEN
+    NEW.stage := 'UNKNOWN_OUTBOUND';  -- Have user_id but no names (owner doing outbound)
+  ELSIF (NEW.first_name IS NOT NULL OR NEW.last_name IS NOT NULL) AND (NEW.instagram_name IS NOT NULL OR NEW.facebook_name IS NOT NULL) THEN
+    NEW.stage := 'NO_STAGE';  -- Have name and platform username
   ELSE
-    NEW.stage := 'NO_STAGE';
+    NEW.stage := 'UNKNOWN_OUTBOUND';  -- Default for ambiguous cases
   END IF;
   
   -- Update the timestamp helper

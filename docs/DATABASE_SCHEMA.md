@@ -88,8 +88,8 @@ The `update_contact_stage()` trigger automatically sets the stage based on the h
 7. **SENT_LINK** - If `SENT_LINK = TRUE`
 8. **LEAD** - If `LEAD = TRUE` OR has symptoms/months data
 9. **LEAD_CONTACT** - If `LEAD_CONTACT = TRUE` OR has email/phone
-10. **UNKNOWN_OUTBOUND** - If user exists but no other data
-11. **NO_STAGE** - Default/fallback
+10. **UNKNOWN_OUTBOUND** - Have user_id but NO names (owner doing outbound interaction)
+11. **NO_STAGE** - Have name AND (instagram_name OR facebook_name) but no other progression
 
 ## ManyChat Integration
 
