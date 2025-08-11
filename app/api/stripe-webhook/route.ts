@@ -157,12 +157,21 @@ export async function POST(request: NextRequest) {
   // Handle the event
   switch (event.type) {
     case 'payment_intent.succeeded':
+      // Only process payment_intent if it has customer info
+      const paymentIntent = event.data.object as any;
+      if (!paymentIntent.customer_email && !paymentIntent.receipt_email) {
+        console.log('Skipping payment_intent.succeeded - no customer info, waiting for checkout.session.completed');
+        // Still log it for debugging but mark as skipped
+        await logEvent(paymentIntent, undefined, 0, 'skipped', 'orphaned');
+        break;
+      }
+      // Fall through if we have customer info
     case 'checkout.session.completed':
       const session = event.data.object as any;
       
       // Extract payment details
       const amount = session.amount || session.amount_total || 0; // Amount in cents
-      const customerEmail = session.customer_email || session.customer_details?.email || null;
+      const customerEmail = session.customer_email || session.customer_details?.email || session.receipt_email || null;
       const customerName = session.customer_details?.name || session.customer_name || null;
       const paymentDate = new Date().toISOString();
       
