@@ -37,12 +37,42 @@ async function getDashboardData(startDate?: string, endDate?: string) {
     boughtPackage: contacts?.filter(c => c.bought_package).length || 0,
   };
 
-  // Get hot leads (only contacts with email or phone for outreach)
+  // Get hot leads - prioritized by funnel stage (highest stage first)
+  // Only include contacts with VALID contact info (not "none", empty, etc)
+  const isValidEmail = (email: string) => {
+    return email && 
+           email.trim() !== '' && 
+           email.toLowerCase() !== 'none' && 
+           email.includes('@');
+  };
+  
+  const isValidPhone = (phone: string) => {
+    return phone && 
+           phone.trim() !== '' && 
+           phone.toLowerCase() !== 'none' &&
+           phone.replace(/\D/g, '').length >= 10; // At least 10 digits
+  };
+  
   const hotLeads = contacts?.filter(c => 
-    (c.email_address || c.phone_number) && // Must have email OR phone for contact
-    (c.lead_contact || c.lead || c.sent_link || c.clicked_link || c.booked || c.attended) &&
+    // Must have VALID email or phone for contact
+    (isValidEmail(c.email_address) || isValidPhone(c.phone_number)) &&
+    // Must be somewhere in the funnel but not purchased
+    (c.lead_contact || c.lead || c.sent_link || c.clicked_link || c.booked || c.attended || c.sent_package) &&
     !c.bought_package
-  ).slice(0, 10) || [];
+  ).sort((a, b) => {
+    // Sort by funnel stage (highest stage first - they're the hottest!)
+    const getStageScore = (c: any) => {
+      if (c.sent_package) return 7;  // Hottest - sent package but didn't buy
+      if (c.attended) return 6;      // Attended but didn't buy
+      if (c.booked) return 5;        // Booked but didn't attend
+      if (c.clicked_link) return 4;  // Clicked but didn't book
+      if (c.sent_link) return 3;     // Sent link but didn't click
+      if (c.lead_contact) return 2;  // Has contact info
+      if (c.lead) return 1;          // Basic lead
+      return 0;
+    };
+    return getStageScore(b) - getStageScore(a);
+  }).slice(0, 10) || [];
 
   // Calculate revenue
   const totalRevenue = contacts?.reduce((sum, c) => sum + (c.total_purchased || 0), 0) || 0;
@@ -135,9 +165,18 @@ function FunnelItem({
 // Contact Card Component
 function ContactCard({ contact }: { contact: any }) {
   const getStageVariant = (stage: string) => {
-    if (stage === 'BOOKED' || stage === 'ATTENDED') return 'default';
-    if (stage === 'SENT_LINK' || stage === 'CLICKED_LINK') return 'secondary';
-    return 'outline';
+    if (stage === 'SENT_PACKAGE' || stage === 'ATTENDED') return 'destructive'; // Red - HOTTEST
+    if (stage === 'BOOKED') return 'default'; // Blue - Very hot
+    if (stage === 'CLICKED_LINK' || stage === 'SENT_LINK') return 'secondary'; // Gray - Warm
+    return 'outline'; // Basic leads
+  };
+  
+  const getPriorityEmoji = (contact: any) => {
+    if (contact.sent_package) return '🔥🔥🔥'; // Triple fire - sent package but didn't buy!
+    if (contact.attended) return '🔥🔥';      // Double fire - attended but didn't buy
+    if (contact.booked) return '🔥';          // Single fire - booked
+    if (contact.clicked_link) return '🟡';    // Yellow - clicked link
+    return '';
   };
 
   return (
@@ -145,6 +184,7 @@ function ContactCard({ contact }: { contact: any }) {
       <div className="flex items-start justify-between gap-2">
         <div className="flex-1">
           <div className="flex items-center gap-2">
+            <span className="text-sm">{getPriorityEmoji(contact)}</span>
             <p className="font-semibold text-sm">
               {contact.first_name} {contact.last_name}
             </p>
@@ -153,10 +193,10 @@ function ContactCard({ contact }: { contact: any }) {
             </Badge>
           </div>
           {contact.email_address && (
-            <p className="text-xs text-gray-600 mt-1">{contact.email_address}</p>
+            <p className="text-xs text-gray-600 mt-1">📧 {contact.email_address}</p>
           )}
           {contact.phone_number && (
-            <p className="text-xs text-gray-600">{contact.phone_number}</p>
+            <p className="text-xs text-gray-600">📱 {contact.phone_number}</p>
           )}
         </div>
       </div>

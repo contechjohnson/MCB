@@ -65,8 +65,9 @@ export function CycleMetricsCard({ metrics }: CycleMetricsCardProps) {
                 <p className="text-lg font-bold text-gray-900">{formatDays(metrics.avgDaysLastContactToPackage)}</p>
               </div>
               <div className="bg-gray-50 rounded-lg p-3">
-                <p className="text-xs text-gray-500">Total Engagement (Buyers)</p>
+                <p className="text-xs text-gray-500">Total Journey (Sub → Package)</p>
                 <p className="text-lg font-bold text-gray-900">{formatDays(metrics.avgDaysEngaged)}</p>
+                <p className="text-xs text-gray-400">For buyers only</p>
               </div>
             </div>
           </div>
@@ -113,9 +114,11 @@ export function calculateCycleMetrics(contacts: any[]): CycleMetrics {
   const contactMetrics = validContacts.map(contact => ({
     daysToFirstPurchase: getDaysBetween(contact.subscription_date, contact.first_purchase_date),
     daysFirstToPackage: getDaysBetween(contact.first_purchase_date, contact.package_purchase_date),
-    daysLastContactToPackage: getDaysBetween(contact.last_interaction_date, contact.package_purchase_date),
-    daysEngaged: contact.first_purchase_date || contact.package_purchase_date
-      ? getDaysBetween(contact.subscription_date, contact.last_interaction_date)
+    daysLastContactToPackage: contact.package_purchase_date && contact.last_interaction_date
+      ? getDaysBetween(contact.last_interaction_date, contact.package_purchase_date)
+      : null,
+    daysEngaged: contact.package_purchase_date
+      ? getDaysBetween(contact.subscription_date, contact.package_purchase_date)
       : null,
     hasFirstPurchase: !!contact.first_purchase_date,
     hasPackagePurchase: !!contact.package_purchase_date,

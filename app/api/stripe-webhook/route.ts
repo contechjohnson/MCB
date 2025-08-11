@@ -232,7 +232,7 @@ export async function POST(request: NextRequest) {
       break;
       
     case 'checkout.session.async_payment_failed':
-      // BNPL rejected
+      // BNPL rejected - these should always have customer info since they got far enough to attempt payment
       const failedContactId = await trackAbandonedCheckout(
         session,
         'bnpl_rejected',
@@ -242,13 +242,21 @@ export async function POST(request: NextRequest) {
       break;
       
     case 'checkout.session.expired':
-      // Checkout timed out
-      const expiredContactId = await trackAbandonedCheckout(
-        session,
-        'expired',
-        'checkout_timeout'
-      );
-      await logStripeEvent(event, session, 'expired', expiredContactId || undefined, 'checkout_timeout');
+      // Checkout timed out - only log if we have customer info
+      const expiredEmail = session.customer_email || session.customer_details?.email;
+      
+      if (expiredEmail || session.customer_details?.name) {
+        // Only track if we have some customer info
+        const expiredContactId = await trackAbandonedCheckout(
+          session,
+          'expired',
+          'checkout_timeout'
+        );
+        await logStripeEvent(event, session, 'expired', expiredContactId || undefined, 'checkout_timeout');
+      } else {
+        // Skip logging expired sessions with no customer info (they never entered details)
+        console.log('Skipping expired session with no customer info');
+      }
       break;
       
     case 'charge.refunded':
