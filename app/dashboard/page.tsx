@@ -2,7 +2,7 @@ import { createClient } from '@supabase/supabase-js';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Progress } from '@/components/ui/progress';
-import { DateFilter } from './date-filter';
+import { DateFilterMinimal } from './date-filter-minimal';
 import { TrendChart } from './trend-chart';
 
 const supabase = createClient(
@@ -36,8 +36,9 @@ async function getDashboardData(startDate?: string, endDate?: string) {
     boughtPackage: contacts?.filter(c => c.bought_package).length || 0,
   };
 
-  // Get hot leads (actionable contacts)
+  // Get hot leads (only contacts with email for outreach)
   const hotLeads = contacts?.filter(c => 
+    c.email_address && // Must have email
     (c.lead_contact || c.lead || c.sent_link || c.clicked_link || c.booked || c.attended) &&
     !c.bought_package
   ).slice(0, 10) || [];
@@ -184,13 +185,10 @@ export default async function DashboardPage({
       <div className="max-w-7xl mx-auto space-y-8">
         {/* Header */}
         <div className="border-b border-gray-200 pb-4">
-          <h1 className="text-3xl font-bold">PPCU{dateRangeText}</h1>
+          <h1 className="text-3xl font-bold text-black">PPCU{dateRangeText}</h1>
         </div>
 
-        {/* Date Filter */}
-        <DateFilter currentStart={searchParams.start} currentEnd={searchParams.end} />
-
-        {/* Trend Chart */}
+        {/* Trend Chart - Show when no filter active */}
         {!searchParams.start && !searchParams.end && (
           <TrendChart monthlyData={monthlyData} />
         )}
@@ -233,12 +231,16 @@ export default async function DashboardPage({
         {/* Main Content */}
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
           {/* Funnel Visualization */}
-          <Card>
-            <CardHeader>
-              <CardTitle>Funnel Performance</CardTitle>
-              <CardDescription>Conversion through each stage</CardDescription>
-            </CardHeader>
-            <CardContent className="space-y-6">
+          <div>
+            {/* Date Filter - positioned right above funnel */}
+            <DateFilterMinimal currentStart={searchParams.start} currentEnd={searchParams.end} />
+            
+            <Card>
+              <CardHeader>
+                <CardTitle>Funnel Performance</CardTitle>
+                <CardDescription>Conversion through each stage</CardDescription>
+              </CardHeader>
+              <CardContent className="space-y-6">
               <FunnelItem 
                 label="Total Contacts" 
                 value={metrics.total} 
@@ -292,8 +294,9 @@ export default async function DashboardPage({
                 total={metrics.total}
                 prevValue={metrics.sentPackage}
               />
-            </CardContent>
-          </Card>
+              </CardContent>
+            </Card>
+          </div>
 
           {/* Hot Leads */}
           <Card>
