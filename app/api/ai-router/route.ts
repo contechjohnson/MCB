@@ -41,6 +41,9 @@ export async function POST(request: NextRequest) {
     // Parse subscription date
     const subscriptionDate = body.subscribed ? new Date(body.subscribed).toISOString() : null;
     
+    // Track last interaction as current time
+    const lastInteractionDate = new Date().toISOString();
+    
     // Determine channel
     const ig_or_fb = body.ig_id || body.ig_username ? 'Instagram' : 'Facebook';
     
@@ -121,7 +124,11 @@ export async function POST(request: NextRequest) {
       
       // Helper timestamp
       date_time_helper: new Date().toISOString(),
-      updated_at: new Date().toISOString()
+      updated_at: new Date().toISOString(),
+      
+      // Cycle time tracking
+      subscription_date: subscriptionDate || new Date().toISOString(),
+      last_interaction_date: lastInteractionDate
     };
 
     // Check if this is a new contact
@@ -161,6 +168,21 @@ export async function POST(request: NextRequest) {
       
       // Keep creation date
       contactData.created_at = existingContact.created_at;
+      
+      // Keep subscription date if already set (don't overwrite)
+      if (existingContact.subscription_date) {
+        contactData.subscription_date = existingContact.subscription_date;
+      }
+      
+      // Keep purchase dates if already set
+      if (existingContact.first_purchase_date) {
+        contactData.first_purchase_date = existingContact.first_purchase_date;
+        contactData.first_purchase_amount = existingContact.first_purchase_amount;
+      }
+      if (existingContact.package_purchase_date) {
+        contactData.package_purchase_date = existingContact.package_purchase_date;
+        contactData.package_purchase_amount = existingContact.package_purchase_amount;
+      }
     } else {
       contactData.created_at = new Date().toISOString();
     }

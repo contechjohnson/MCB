@@ -152,13 +152,28 @@ export async function POST(request: NextRequest) {
           updated_at: paymentDate,
         };
         
-        if (amount === 2000) { // $20.00 discovery call
-          updateData.attended = true;
-          console.log('Marking as attended (discovery call payment)');
-        } else if (amount > 2000) { // Package purchase
+        // Track purchase dates based on amount thresholds
+        if (amount <= 3000) { // $30 or less - considered "first purchase"
+          // Only set first_purchase_date if not already set
+          if (!contact.first_purchase_date) {
+            updateData.first_purchase_date = paymentDate;
+            updateData.first_purchase_amount = amount / 100;
+            console.log(`Setting first purchase date: $${amount/100}`);
+          }
+          
+          // Also handle specific discovery call
+          if (amount === 2000) { // $20.00 discovery call
+            updateData.attended = true;
+            console.log('Marking as attended (discovery call payment)');
+          }
+        } 
+        
+        if (amount > 3000) { // More than $30 - package purchase
+          updateData.package_purchase_date = paymentDate;
+          updateData.package_purchase_amount = amount / 100;
           updateData.bought_package = true;
           updateData.sent_package = true; // Assume package was sent if they bought
-          console.log('Marking as package purchased');
+          console.log(`Setting package purchase date: $${amount/100}`);
         }
         
         // Update contact

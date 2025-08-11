@@ -4,6 +4,7 @@ import { Badge } from '@/components/ui/badge';
 import { Progress } from '@/components/ui/progress';
 import { DateFilterMinimal } from './date-filter-minimal';
 import { TrendChart } from './trend-chart';
+import { CycleMetricsCard, calculateCycleMetrics } from './cycle-metrics';
 
 const supabase = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_URL!,
@@ -84,6 +85,9 @@ async function getDashboardData(startDate?: string, endDate?: string) {
     }
   }
 
+  // Calculate cycle time metrics
+  const cycleMetrics = calculateCycleMetrics(contacts || []);
+
   return {
     metrics,
     hotLeads,
@@ -91,6 +95,7 @@ async function getDashboardData(startDate?: string, endDate?: string) {
     thisMonthContacts,
     lastMonthContacts,
     monthlyData,
+    cycleMetrics,
   };
 }
 
@@ -164,7 +169,7 @@ export default async function DashboardPage({
 }: { 
   searchParams: { start?: string; end?: string } 
 }) {
-  const { metrics, hotLeads, totalRevenue, thisMonthContacts, lastMonthContacts, monthlyData } = 
+  const { metrics, hotLeads, totalRevenue, thisMonthContacts, lastMonthContacts, monthlyData, cycleMetrics } = 
     await getDashboardData(searchParams.start, searchParams.end);
 
   const conversionRate = metrics.total > 0 
@@ -354,6 +359,9 @@ export default async function DashboardPage({
             </div>
           </CardContent>
         </Card>
+
+        {/* Cycle Time Metrics */}
+        <CycleMetricsCard metrics={cycleMetrics} />
 
         {/* Trend Chart - Show when no filter active */}
         {!searchParams.start && !searchParams.end && (
