@@ -126,6 +126,34 @@ export async function POST(request: NextRequest) {
 
   console.log('Processing Stripe event:', event.type);
 
+  // Log the event first (for debugging and analytics)
+  const logEvent = async (
+    eventData: any, 
+    matchedContactId?: string, 
+    confidence?: number, 
+    method?: string,
+    status: 'matched' | 'orphaned' | 'refunded' | 'failed' = 'orphaned'
+  ) => {
+    try {
+      await supabaseAdmin
+        .from('stripe_webhook_logs')
+        .insert({
+          event_id: event.id,
+          event_type: event.type,
+          amount: (eventData.amount || eventData.amount_total || 0) / 100,
+          customer_email: eventData.customer_email || eventData.customer_details?.email || null,
+          customer_name: eventData.customer_details?.name || eventData.customer_name || null,
+          matched_contact_id: matchedContactId || null,
+          match_confidence: confidence || 0,
+          match_method: method || 'not_matched',
+          status: status,
+          raw_event: event,
+        });
+    } catch (logError) {
+      console.error('Failed to log Stripe event:', logError);
+    }
+  };
+
   // Handle the event
   switch (event.type) {
     case 'payment_intent.succeeded':
@@ -145,6 +173,10 @@ export async function POST(request: NextRequest) {
       
       if (contact) {
         console.log(`Updating contact ${contact.user_id} with payment`);
+        
+        // Log successful match
+        const matchMethod = customerEmail && contact.email_address === customerEmail ? 'email' : 'name_fuzzy';
+        await logEvent(session, contact.user_id, confidence, matchMethod, 'matched');
         
         // Determine what was purchased based on amount
         const updateData: any = {
@@ -195,8 +227,8 @@ export async function POST(request: NextRequest) {
         // Log orphaned payment for manual review
         console.warn(`Orphaned payment: ${customerEmail || customerName} - $${amount/100} - No matching contact found`);
         
-        // You could create an orphaned_payments table to track these
-        // For now, just log it
+        // Log orphaned payment
+        await logEvent(session, undefined, 0, 'not_matched', 'orphaned');
       }
       
       break;
