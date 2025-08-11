@@ -184,14 +184,10 @@ export default async function DashboardPage({
     <div className="min-h-screen bg-white p-4 md:p-8">
       <div className="max-w-7xl mx-auto space-y-8">
         {/* Header */}
-        <div className="border-b border-gray-200 pb-4">
+        <div className="border-b border-gray-200 pb-4 flex items-center justify-between">
           <h1 className="text-3xl font-bold text-black">PPCU{dateRangeText}</h1>
+          <DateFilterMinimal currentStart={searchParams.start} currentEnd={searchParams.end} />
         </div>
-
-        {/* Trend Chart - Show when no filter active */}
-        {!searchParams.start && !searchParams.end && (
-          <TrendChart monthlyData={monthlyData} />
-        )}
 
         {/* KPI Cards */}
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
@@ -231,11 +227,7 @@ export default async function DashboardPage({
         {/* Main Content */}
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
           {/* Funnel Visualization */}
-          <div>
-            {/* Date Filter - positioned right above funnel */}
-            <DateFilterMinimal currentStart={searchParams.start} currentEnd={searchParams.end} />
-            
-            <Card>
+          <Card>
               <CardHeader>
                 <CardTitle>Funnel Performance</CardTitle>
                 <CardDescription>Conversion through each stage</CardDescription>
@@ -294,9 +286,8 @@ export default async function DashboardPage({
                 total={metrics.total}
                 prevValue={metrics.sentPackage}
               />
-              </CardContent>
-            </Card>
-          </div>
+            </CardContent>
+          </Card>
 
           {/* Hot Leads */}
           <Card>
@@ -363,6 +354,11 @@ export default async function DashboardPage({
             </div>
           </CardContent>
         </Card>
+
+        {/* Trend Chart - Show when no filter active */}
+        {!searchParams.start && !searchParams.end && (
+          <TrendChart monthlyData={monthlyData} />
+        )}
       </div>
     </div>
   );

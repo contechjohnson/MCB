@@ -20,15 +20,15 @@ export function TrendChart({ monthlyData }: { monthlyData: MonthData[] }) {
   const maxValue = Math.max(...monthlyData.map(d => d.total));
 
   return (
-    <Card className="mb-6">
-      <CardHeader>
-        <CardTitle>Funnel Trends</CardTitle>
-        <CardDescription>Performance over the last 6 months</CardDescription>
+    <Card>
+      <CardHeader className="pb-3">
+        <CardTitle className="text-lg">Funnel Trends</CardTitle>
+        <CardDescription className="text-xs">Performance over the last 6 months</CardDescription>
       </CardHeader>
       <CardContent>
-        <div className="space-y-6">
+        <div className="space-y-4">
           {/* Mini bar chart */}
-          <div className="flex items-end gap-2 h-32">
+          <div className="flex items-end gap-1 h-20">
             {monthlyData.map((data, idx) => (
               <div key={idx} className="flex-1 flex flex-col items-center gap-1">
                 <div className="w-full flex flex-col items-center gap-px">
@@ -36,40 +36,40 @@ export function TrendChart({ monthlyData }: { monthlyData: MonthData[] }) {
                   <div 
                     className="w-full bg-gray-900 rounded-t"
                     style={{ 
-                      height: `${(data.bought / maxValue) * 100}px`,
-                      minHeight: data.bought > 0 ? '2px' : '0'
+                      height: `${(data.bought / maxValue) * 60}px`,
+                      minHeight: data.bought > 0 ? '1px' : '0'
                     }}
                     title={`Bought: ${data.bought}`}
                   />
                   <div 
                     className="w-full bg-gray-700"
                     style={{ 
-                      height: `${((data.attended - data.bought) / maxValue) * 100}px`,
-                      minHeight: data.attended > data.bought ? '2px' : '0'
+                      height: `${((data.attended - data.bought) / maxValue) * 60}px`,
+                      minHeight: data.attended > data.bought ? '1px' : '0'
                     }}
                     title={`Attended: ${data.attended}`}
                   />
                   <div 
                     className="w-full bg-gray-500"
                     style={{ 
-                      height: `${((data.booked - data.attended) / maxValue) * 100}px`,
-                      minHeight: data.booked > data.attended ? '2px' : '0'
+                      height: `${((data.booked - data.attended) / maxValue) * 60}px`,
+                      minHeight: data.booked > data.attended ? '1px' : '0'
                     }}
                     title={`Booked: ${data.booked}`}
                   />
                   <div 
                     className="w-full bg-gray-300"
                     style={{ 
-                      height: `${((data.lead - data.booked) / maxValue) * 100}px`,
-                      minHeight: data.lead > data.booked ? '2px' : '0'
+                      height: `${((data.lead - data.booked) / maxValue) * 60}px`,
+                      minHeight: data.lead > data.booked ? '1px' : '0'
                     }}
                     title={`Lead: ${data.lead}`}
                   />
                   <div 
                     className="w-full bg-gray-100 rounded-b"
                     style={{ 
-                      height: `${((data.total - data.lead) / maxValue) * 100}px`,
-                      minHeight: data.total > data.lead ? '2px' : '0'
+                      height: `${((data.total - data.lead) / maxValue) * 60}px`,
+                      minHeight: data.total > data.lead ? '1px' : '0'
                     }}
                     title={`Total: ${data.total}`}
                   />
@@ -105,9 +105,9 @@ export function TrendChart({ monthlyData }: { monthlyData: MonthData[] }) {
 
           {/* Month over Month Comparison */}
           {monthlyData.length >= 2 && (
-            <div className="border-t pt-4 mt-4">
-              <h4 className="text-sm font-medium mb-3">Month-over-Month Change</h4>
-              <div className="grid grid-cols-2 md:grid-cols-5 gap-4">
+            <div className="border-t pt-3 mt-3">
+              <h4 className="text-xs font-medium text-gray-600 mb-2">Month-over-Month Change</h4>
+              <div className="grid grid-cols-5 gap-2">
                 {[
                   { label: 'Total', current: monthlyData[monthlyData.length - 1].total, prev: monthlyData[monthlyData.length - 2].total },
                   { label: 'Leads', current: monthlyData[monthlyData.length - 1].lead, prev: monthlyData[monthlyData.length - 2].lead },
@@ -120,8 +120,8 @@ export function TrendChart({ monthlyData }: { monthlyData: MonthData[] }) {
                   return (
                     <div key={metric.label} className="text-center">
                       <p className="text-xs text-gray-500">{metric.label}</p>
-                      <p className="text-lg font-bold">{metric.current}</p>
-                      <p className={`text-xs ${isPositive ? 'text-gray-700' : 'text-gray-500'}`}>
+                      <p className="text-sm font-semibold">{metric.current}</p>
+                      <p className={`text-xs ${isPositive ? 'text-gray-600' : 'text-gray-400'}`}>
                         {isPositive ? '+' : ''}{change.toFixed(0)}%
                       </p>
                     </div>
