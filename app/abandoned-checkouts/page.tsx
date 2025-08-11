@@ -154,7 +154,7 @@ export default async function AbandonedCheckoutsPage() {
                           {lead.matched_contact_id && (
                             <p className="text-gray-500">
                               Existing contact: {lead.first_name} {lead.last_name}
-                              {lead.ig_username && ` • IG: @${lead.ig_username}`}
+                              {lead.instagram_name && ` • IG: @${lead.instagram_name}`}
                             </p>
                           )}
                           <p className="text-gray-500">

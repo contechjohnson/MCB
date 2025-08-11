@@ -86,6 +86,7 @@ export async function POST(request: NextRequest) {
       .insert({
         event_id: eventId,
         event_type: 'test.payment',
+        checkout_session_id: `test_session_${Date.now()}`,
         amount: amount / 100,
         customer_email: email,
         customer_name: name,
@@ -93,6 +94,7 @@ export async function POST(request: NextRequest) {
         match_confidence: matchConfidence,
         match_method: matchMethod,
         status: status,
+        payment_method_type: 'test',
         raw_event: {
           test: true,
           created_at: paymentDate,

@@ -27,8 +27,8 @@ async function getDashboardData(startDate?: string, endDate?: string) {
   // Calculate funnel metrics
   const metrics = {
     total: contacts?.length || 0,
-    leadContact: contacts?.filter(c => c.lead_contact).length || 0,
-    lead: contacts?.filter(c => c.lead).length || 0,
+    lead: contacts?.filter(c => c.lead).length || 0,  // Lead comes first
+    leadContact: contacts?.filter(c => c.lead_contact).length || 0,  // Then Lead with Contact Info
     sentLink: contacts?.filter(c => c.sent_link).length || 0,
     clickedLink: contacts?.filter(c => c.clicked_link).length || 0,
     booked: contacts?.filter(c => c.booked).length || 0,
@@ -37,9 +37,9 @@ async function getDashboardData(startDate?: string, endDate?: string) {
     boughtPackage: contacts?.filter(c => c.bought_package).length || 0,
   };
 
-  // Get hot leads (only contacts with email for outreach)
+  // Get hot leads (only contacts with email or phone for outreach)
   const hotLeads = contacts?.filter(c => 
-    c.email_address && // Must have email
+    (c.email_address || c.phone_number) && // Must have email OR phone for contact
     (c.lead_contact || c.lead || c.sent_link || c.clicked_link || c.booked || c.attended) &&
     !c.bought_package
   ).slice(0, 10) || [];
@@ -244,16 +244,16 @@ export default async function DashboardPage({
                 total={metrics.total}
               />
               <FunnelItem 
-                label="Lead (Contact Info)" 
-                value={metrics.leadContact} 
+                label="Lead" 
+                value={metrics.lead} 
                 total={metrics.total}
                 prevValue={metrics.total}
               />
               <FunnelItem 
-                label="Lead" 
-                value={metrics.lead} 
+                label="Lead (Contact Info)" 
+                value={metrics.leadContact} 
                 total={metrics.total}
-                prevValue={metrics.leadContact}
+                prevValue={metrics.lead}
               />
               <FunnelItem 
                 label="Sent Link" 

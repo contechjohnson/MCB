@@ -14,93 +14,162 @@ const supabaseAdmin = createClient(
   { auth: { persistSession: false } }
 );
 
-// Normalize strings for fuzzy matching
-function normalizeString(str: string | null | undefined): string {
-  if (!str) return '';
-  return str.toLowerCase()
-    .replace(/[^a-z0-9]/g, '')
-    .trim();
+// Helper to find matching contact
+async function findContactByEmail(email: string | null) {
+  if (!email) return null;
+  
+  const { data } = await supabaseAdmin
+    .from('contacts')
+    .select('*')
+    .eq('email_address', email)
+    .single();
+  
+  return data;
 }
 
-// Calculate match score between two strings (0-100)
-function getMatchScore(str1: string, str2: string): number {
-  const norm1 = normalizeString(str1);
-  const norm2 = normalizeString(str2);
-  
-  if (!norm1 || !norm2) return 0;
-  if (norm1 === norm2) return 100;
-  
-  // Simple character-based similarity
-  const longer = norm1.length > norm2.length ? norm1 : norm2;
-  const shorter = norm1.length > norm2.length ? norm2 : norm1;
-  
-  if (longer.includes(shorter) && shorter.length > 3) {
-    return 90; // Substring match
+// Helper to log all events with full details
+async function logStripeEvent(
+  event: Stripe.Event,
+  session: any,
+  status: string,
+  matchedContactId?: string,
+  abandonmentReason?: string
+) {
+  try {
+    const customerEmail = session.customer_email || session.customer_details?.email || session.billing_details?.email;
+    const customerName = session.customer_details?.name || session.billing_details?.name;
+    const customerPhone = session.customer_details?.phone || session.billing_details?.phone;
+    
+    await supabaseAdmin
+      .from('stripe_webhook_logs')
+      .insert({
+        event_id: event.id,
+        event_type: event.type,
+        checkout_session_id: session.id,
+        status: status,
+        matched_contact_id: matchedContactId,
+        match_confidence: matchedContactId ? 100 : 0,
+        match_method: matchedContactId ? 'email' : 'not_matched',
+        customer_email: customerEmail,
+        customer_name: customerName,
+        customer_phone: customerPhone,
+        amount: (session.amount_total || session.amount || session.amount_refunded || 0) / 100,
+        payment_method_type: session.payment_method_types?.[0] || 'unknown',
+        abandonment_reason: abandonmentReason,
+        abandoned_at: abandonmentReason ? new Date().toISOString() : null,
+        raw_event: event,
+        created_at: new Date().toISOString(),
+      });
+  } catch (error) {
+    console.error('Failed to log Stripe event:', error);
   }
-  
-  // Calculate common characters percentage
-  let matches = 0;
-  for (let i = 0; i < shorter.length; i++) {
-    if (longer.includes(shorter[i])) matches++;
-  }
-  
-  return Math.round((matches / longer.length) * 100);
 }
 
-// Find matching contact in database
-async function findMatchingContact(email: string | null, name: string | null) {
-  // First try exact email match
-  if (email) {
-    const { data: emailMatch } = await supabaseAdmin
-      .from('contacts')
-      .select('*')
-      .eq('email_address', email)
-      .single();
-    
-    if (emailMatch) {
-      console.log(`Found contact by email: ${email}`);
-      return { contact: emailMatch, confidence: 100 };
-    }
-  }
+// Process successful payment
+async function processSuccessfulPayment(session: any) {
+  const amount = session.amount_total || 0;
+  const customerEmail = session.customer_email || session.customer_details?.email;
+  const customerName = session.customer_details?.name;
+  const paymentDate = new Date().toISOString();
   
-  // If no email match, try fuzzy name matching
-  if (name) {
-    const { data: allContacts } = await supabaseAdmin
-      .from('contacts')
-      .select('*')
-      .not('first_name', 'is', null);
+  console.log(`Processing successful payment: $${amount/100} from ${customerEmail}`);
+  
+  // Find matching contact
+  const contact = await findContactByEmail(customerEmail);
+  
+  if (contact) {
+    // Update contact with purchase data
+    const updateData: any = {
+      total_purchased: (contact.total_purchased || 0) + (amount / 100),
+      updated_at: paymentDate,
+    };
     
-    if (allContacts) {
-      let bestMatch = null;
-      let bestScore = 0;
-      
-      for (const contact of allContacts) {
-        // Try matching against various name combinations
-        const fullName = `${contact.first_name || ''} ${contact.last_name || ''}`.trim();
-        const scores = [
-          getMatchScore(name, fullName),
-          getMatchScore(name, contact.first_name),
-          getMatchScore(name, contact.last_name),
-          getMatchScore(name, contact.facebook_name),
-          getMatchScore(name, contact.instagram_name),
-        ];
-        
-        const maxScore = Math.max(...scores);
-        
-        if (maxScore > bestScore) {
-          bestScore = maxScore;
-          bestMatch = contact;
-        }
+    // Track purchase dates by amount
+    if (amount <= 3000) { // $30 or less - first purchase
+      if (!contact.first_purchase_date) {
+        updateData.first_purchase_date = paymentDate;
+        updateData.first_purchase_amount = amount / 100;
       }
-      
-      if (bestScore >= 85) {
-        console.log(`Found contact by name with ${bestScore}% confidence: ${name}`);
-        return { contact: bestMatch, confidence: bestScore };
+      if (amount === 2000) { // $20 discovery call
+        updateData.attended = true;
       }
     }
+    
+    if (amount > 3000) { // Package purchase
+      updateData.package_purchase_date = paymentDate;
+      updateData.package_purchase_amount = amount / 100;
+      updateData.bought_package = true;
+      updateData.sent_package = true;
+    }
+    
+    await supabaseAdmin
+      .from('contacts')
+      .update(updateData)
+      .eq('user_id', contact.user_id);
+    
+    console.log(`Updated contact ${contact.user_id} with payment`);
+    return contact.user_id;
+  } else {
+    console.log(`No matching contact for ${customerEmail} - payment orphaned`);
+    return null;
+  }
+}
+
+// Track abandoned checkout (now just logs with proper status)
+async function trackAbandonedCheckout(
+  session: any,
+  status: string,
+  reason: string
+) {
+  const customerEmail = session.customer_email || session.customer_details?.email;
+  
+  console.log(`Tracking abandoned checkout: ${session.id} - ${status} - ${reason}`);
+  
+  // Find matching contact
+  const contact = await findContactByEmail(customerEmail);
+  
+  return contact?.user_id;
+}
+
+// Mark abandoned checkout as converted in stripe_webhook_logs
+async function markCheckoutConverted(sessionId: string) {
+  const { error } = await supabaseAdmin
+    .from('stripe_webhook_logs')
+    .update({
+      status: 'converted',
+      converted_at: new Date().toISOString(),
+    })
+    .eq('checkout_session_id', sessionId)
+    .in('status', ['bnpl_pending', 'expired', 'failed', 'bnpl_rejected']);
+  
+  if (error) {
+    console.error('Error marking checkout as converted:', error);
+  }
+}
+
+// Process refund
+async function processRefund(charge: any) {
+  const refundAmount = charge.amount_refunded || 0;
+  const refundEmail = charge.billing_details?.email || charge.receipt_email;
+  
+  console.log(`Processing refund: $${refundAmount/100} for ${refundEmail}`);
+  
+  const contact = await findContactByEmail(refundEmail);
+  
+  if (contact) {
+    await supabaseAdmin
+      .from('contacts')
+      .update({
+        total_purchased: Math.max(0, (contact.total_purchased || 0) - (refundAmount / 100)),
+        updated_at: new Date().toISOString(),
+      })
+      .eq('user_id', contact.user_id);
+    
+    console.log('Refund processed successfully');
+    return contact.user_id;
   }
   
-  return { contact: null, confidence: 0 };
+  return null;
 }
 
 export async function POST(request: NextRequest) {
@@ -124,159 +193,74 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: `Webhook Error: ${err.message}` }, { status: 400 });
   }
 
-  console.log('Processing Stripe event:', event.type);
+  console.log(`Processing Stripe event: ${event.type}`);
+  const session = event.data.object as any;
+  const sessionId = session.id;
 
-  // Log the event first (for debugging and analytics)
-  const logEvent = async (
-    eventData: any, 
-    matchedContactId?: string, 
-    confidence?: number, 
-    method?: string,
-    status: 'matched' | 'orphaned' | 'refunded' | 'failed' = 'orphaned'
-  ) => {
-    try {
-      await supabaseAdmin
-        .from('stripe_webhook_logs')
-        .insert({
-          event_id: event.id,
-          event_type: event.type,
-          amount: (eventData.amount || eventData.amount_total || 0) / 100,
-          customer_email: eventData.customer_email || eventData.customer_details?.email || null,
-          customer_name: eventData.customer_details?.name || eventData.customer_name || null,
-          matched_contact_id: matchedContactId || null,
-          match_confidence: confidence || 0,
-          match_method: method || 'not_matched',
-          status: status,
-          raw_event: event,
-        });
-    } catch (logError) {
-      console.error('Failed to log Stripe event:', logError);
-    }
-  };
-
-  // Handle the event
+  // Handle different event types
   switch (event.type) {
-    case 'payment_intent.succeeded':
-      // Only process payment_intent if it has customer info
-      const paymentIntent = event.data.object as any;
-      if (!paymentIntent.customer_email && !paymentIntent.receipt_email) {
-        console.log('Skipping payment_intent.succeeded - no customer info, waiting for checkout.session.completed');
-        // Still log it for debugging but mark as skipped
-        await logEvent(paymentIntent, undefined, 0, 'skipped', 'orphaned');
-        break;
-      }
-      // Fall through if we have customer info
     case 'checkout.session.completed':
-      const session = event.data.object as any;
+      // Check payment status to determine if paid or abandoned
+      const paymentStatus = session.payment_status;
       
-      // Extract payment details
-      const amount = session.amount || session.amount_total || 0; // Amount in cents
-      const customerEmail = session.customer_email || session.customer_details?.email || session.receipt_email || null;
-      const customerName = session.customer_details?.name || session.customer_name || null;
-      const paymentDate = new Date().toISOString();
-      
-      console.log(`Payment received: $${amount/100} from ${customerEmail || customerName}`);
-      
-      // Find matching contact
-      const { contact, confidence } = await findMatchingContact(customerEmail, customerName);
-      
-      if (contact) {
-        console.log(`Updating contact ${contact.user_id} with payment`);
+      if (paymentStatus === 'paid') {
+        // Successful instant payment (card, etc.)
+        const contactId = await processSuccessfulPayment(session);
+        await logStripeEvent(event, session, 'matched', contactId || undefined);
         
-        // Log successful match
-        const matchMethod = customerEmail && contact.email_address === customerEmail ? 'email' : 'name_fuzzy';
-        await logEvent(session, contact.user_id, confidence, matchMethod, 'matched');
+        // Also mark as converted if it was previously abandoned
+        await markCheckoutConverted(sessionId);
         
-        // Determine what was purchased based on amount
-        const updateData: any = {
-          total_purchased: (contact.total_purchased || 0) + (amount / 100),
-          updated_at: paymentDate,
-        };
-        
-        // Track purchase dates based on amount thresholds
-        if (amount <= 3000) { // $30 or less - considered "first purchase"
-          // Only set first_purchase_date if not already set
-          if (!contact.first_purchase_date) {
-            updateData.first_purchase_date = paymentDate;
-            updateData.first_purchase_amount = amount / 100;
-            console.log(`Setting first purchase date: $${amount/100}`);
-          }
-          
-          // Also handle specific discovery call
-          if (amount === 2000) { // $20.00 discovery call
-            updateData.attended = true;
-            console.log('Marking as attended (discovery call payment)');
-          }
-        } 
-        
-        if (amount > 3000) { // More than $30 - package purchase
-          updateData.package_purchase_date = paymentDate;
-          updateData.package_purchase_amount = amount / 100;
-          updateData.bought_package = true;
-          updateData.sent_package = true; // Assume package was sent if they bought
-          console.log(`Setting package purchase date: $${amount/100}`);
-        }
-        
-        // Update contact
-        const { error: updateError } = await supabaseAdmin
-          .from('contacts')
-          .update(updateData)
-          .eq('user_id', contact.user_id);
-        
-        if (updateError) {
-          console.error('Error updating contact:', updateError);
-        } else {
-          console.log('Contact updated successfully');
-        }
-        
-        // Log payment for audit trail
-        console.log(`Payment logged: ${customerEmail} - $${amount/100} - Confidence: ${confidence}%`);
-        
-      } else {
-        // Log orphaned payment for manual review
-        console.warn(`Orphaned payment: ${customerEmail || customerName} - $${amount/100} - No matching contact found`);
-        
-        // Log orphaned payment
-        await logEvent(session, undefined, 0, 'not_matched', 'orphaned');
+      } else if (paymentStatus === 'unpaid' || paymentStatus === 'processing') {
+        // BNPL pending or payment processing
+        const contactId = await trackAbandonedCheckout(
+          session, 
+          'bnpl_pending',
+          'buy_now_pay_later_pending'
+        );
+        await logStripeEvent(event, session, 'bnpl_pending', contactId || undefined, 'buy_now_pay_later_pending');
       }
-      
       break;
       
-    case 'payment_intent.payment_failed':
-      console.log('Payment failed:', event.data.object);
+    case 'checkout.session.async_payment_succeeded':
+      // BNPL or delayed payment succeeded
+      const contactId = await processSuccessfulPayment(session);
+      await logStripeEvent(event, session, 'matched', contactId || undefined);
+      
+      // Mark previous abandonment as converted
+      await markCheckoutConverted(sessionId);
+      break;
+      
+    case 'checkout.session.async_payment_failed':
+      // BNPL rejected
+      const failedContactId = await trackAbandonedCheckout(
+        session,
+        'bnpl_rejected',
+        'buy_now_pay_later_declined'
+      );
+      await logStripeEvent(event, session, 'bnpl_rejected', failedContactId || undefined, 'buy_now_pay_later_declined');
+      break;
+      
+    case 'checkout.session.expired':
+      // Checkout timed out
+      const expiredContactId = await trackAbandonedCheckout(
+        session,
+        'expired',
+        'checkout_timeout'
+      );
+      await logStripeEvent(event, session, 'expired', expiredContactId || undefined, 'checkout_timeout');
       break;
       
     case 'charge.refunded':
-      const refund = event.data.object as any;
-      const refundAmount = refund.amount_refunded || 0;
-      const refundEmail = refund.billing_details?.email || null;
-      const refundName = refund.billing_details?.name || null;
-      
-      console.log(`Refund processed: $${refundAmount/100} for ${refundEmail || refundName}`);
-      
-      // Find matching contact for refund
-      const { contact: refundContact } = await findMatchingContact(refundEmail, refundName);
-      
-      if (refundContact) {
-        // Subtract refund from total purchased
-        const { error: refundError } = await supabaseAdmin
-          .from('contacts')
-          .update({
-            total_purchased: Math.max(0, (refundContact.total_purchased || 0) - (refundAmount / 100)),
-            updated_at: new Date().toISOString(),
-          })
-          .eq('user_id', refundContact.user_id);
-        
-        if (refundError) {
-          console.error('Error processing refund:', refundError);
-        } else {
-          console.log('Refund processed successfully');
-        }
-      }
+      // Handle refunds
+      const refundContactId = await processRefund(session);
+      await logStripeEvent(event, session, 'refunded', refundContactId || undefined);
       break;
       
     default:
+      // Log any other events for debugging
       console.log(`Unhandled event type: ${event.type}`);
+      await logStripeEvent(event, session, 'unhandled');
   }
 
   return NextResponse.json({ received: true });

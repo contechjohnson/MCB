@@ -27,13 +27,13 @@ CREATE TABLE IF NOT EXISTS abandoned_checkouts (
     converted_at TIMESTAMPTZ, -- If they eventually complete payment
     
     -- Raw Stripe data for debugging
-    raw_event JSONB,
-    
-    -- Indexes for queries
-    INDEX idx_abandoned_status (status),
-    INDEX idx_abandoned_email (customer_email),
-    INDEX idx_abandoned_created (created_at DESC)
+    raw_event JSONB
 );
+
+-- Create indexes separately (PostgreSQL doesn't support inline indexes)
+CREATE INDEX IF NOT EXISTS idx_abandoned_status ON abandoned_checkouts(status);
+CREATE INDEX IF NOT EXISTS idx_abandoned_email ON abandoned_checkouts(customer_email);
+CREATE INDEX IF NOT EXISTS idx_abandoned_created ON abandoned_checkouts(created_at DESC);
 
 -- Create view for hot leads (abandoned checkouts that haven't converted)
 CREATE OR REPLACE VIEW hot_abandoned_leads AS
@@ -56,8 +56,8 @@ SELECT
     c.first_name,
     c.last_name,
     c.phone_number,
-    c.ig_username,
-    c.fb_username
+    c.instagram_name,
+    c.facebook_name
 FROM abandoned_checkouts ac
 LEFT JOIN contacts c ON ac.matched_contact_id = c.user_id
 WHERE ac.status IN ('expired', 'failed', 'bnpl_rejected')
