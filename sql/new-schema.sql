@@ -64,6 +64,7 @@ CREATE TABLE public.contacts (
   ig_or_fb TEXT CHECK (ig_or_fb IN ('Instagram', 'Facebook', 'Both')),
   
   -- Attribution and testing
+  tags TEXT,  -- Raw space-separated tags from ManyChat
   trigger_word_tags TEXT,
   ab_test_tags TEXT,
   paid_vs_organic TEXT CHECK (paid_vs_organic IN ('PAID', 'ORGANIC')),

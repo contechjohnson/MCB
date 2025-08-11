@@ -50,15 +50,16 @@ export async function POST(request: NextRequest) {
     
     // Extract trigger words, A/B test tags, and source
     const trigger_word_tags = tagArray.filter((t: string) => 
-      ['RELIEF', '55', 'HEAL'].some(word => t.includes(word))
+      ['55', 'expert', 'heal'].some(word => t.toLowerCase().includes(word.toLowerCase()))
     ).join(', ');
     
     const ab_test_tags = tagArray.find((t: string) => 
       t.includes('CHATBOT')
     ) || null;
     
+    // PAID if tags contain 55, expert, or heal - ORGANIC otherwise
     const paid_vs_organic = tagArray.some((t: string) => 
-      t.toLowerCase().includes('paid')
+      ['55', 'expert', 'heal'].some(word => t.toLowerCase().includes(word.toLowerCase()))
     ) ? 'PAID' : 'ORGANIC';
 
     // Prepare contact data matching new schema exactly
@@ -112,6 +113,7 @@ export async function POST(request: NextRequest) {
       trigger_word_tags: trigger_word_tags || null,
       ab_test_tags: ab_test_tags,
       paid_vs_organic: paid_vs_organic,
+      tags: allTags || null,  // Store raw tags string for searching
       
       // Thread and ad tracking
       thread_id: customFields['Conversation ID'] || null,
