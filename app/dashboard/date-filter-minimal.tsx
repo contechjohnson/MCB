@@ -11,8 +11,8 @@ export function DateFilterMinimal({ currentStart, currentEnd }: { currentStart?:
 
   const handleApplyFilter = () => {
     const params = new URLSearchParams();
-    if (startDate) params.set('start', startDate);
-    if (endDate) params.set('end', endDate);
+    if (startDate) params.set('startDate', startDate);
+    if (endDate) params.set('endDate', endDate);
     router.push(`/dashboard?${params.toString()}`);
     setIsExpanded(false);
   };
@@ -32,8 +32,8 @@ export function DateFilterMinimal({ currentStart, currentEnd }: { currentStart?:
       const lastDay = new Date(parseInt(year), parseInt(month), 0);
       
       const params = new URLSearchParams();
-      params.set('start', firstDay.toISOString().split('T')[0]);
-      params.set('end', lastDay.toISOString().split('T')[0]);
+      params.set('startDate', firstDay.toISOString().split('T')[0]);
+      params.set('endDate', lastDay.toISOString().split('T')[0]);
       router.push(`/dashboard?${params.toString()}`);
       setIsExpanded(false);
     }

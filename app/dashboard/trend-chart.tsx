@@ -12,7 +12,7 @@ interface MonthData {
 }
 
 export function TrendChart({ monthlyData }: { monthlyData: MonthData[] }) {
-  if (monthlyData.length === 0) {
+  if (!monthlyData || monthlyData.length === 0) {
     return null;
   }
 

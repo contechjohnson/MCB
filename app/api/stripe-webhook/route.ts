@@ -85,21 +85,37 @@ async function processSuccessfulPayment(session: any) {
     };
     
     // Track purchase dates by amount
-    if (amount <= 3000) { // $30 or less - first purchase
+    if (amount <= 3000) { // $30 or less - first purchase/discovery call
       if (!contact.first_purchase_date) {
         updateData.first_purchase_date = paymentDate;
         updateData.first_purchase_amount = amount / 100;
       }
-      if (amount === 2000) { // $20 discovery call
-        updateData.attended = true;
-      }
+      // Discovery call means they attended
+      updateData.attended = true;
+      updateData.booked = true; // They must have booked to attend
+      updateData.clicked_link = true; // They must have clicked to book
+      updateData.sent_link = true; // They must have been sent link
+      updateData.lead_contact = true; // We have their contact info
+      updateData.lead = true; // They're definitely a lead
     }
     
-    if (amount > 3000) { // Package purchase
+    if (amount > 3000) { // Package purchase ($30+ is considered package)
       updateData.package_purchase_date = paymentDate;
       updateData.package_purchase_amount = amount / 100;
       updateData.bought_package = true;
-      updateData.sent_package = true;
+      updateData.sent_package = true; // Must have been sent package to buy
+      updateData.attended = true; // Must have attended to get package
+      updateData.booked = true; // Must have booked to attend
+      updateData.clicked_link = true; // Must have clicked to book
+      updateData.sent_link = true; // Must have been sent link
+      updateData.lead_contact = true; // We have their contact info
+      updateData.lead = true; // They're definitely a lead
+      
+      // Also set first purchase if not set
+      if (!contact.first_purchase_date) {
+        updateData.first_purchase_date = paymentDate;
+        updateData.first_purchase_amount = amount / 100;
+      }
     }
     
     await supabaseAdmin

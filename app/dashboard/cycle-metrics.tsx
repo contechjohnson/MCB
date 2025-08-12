@@ -7,6 +7,7 @@ interface CycleMetrics {
   avgDaysEngaged: number | null;
   medianDaysToFirstPurchase: number | null;
   medianDaysFirstToPackage: number | null;
+  medianDaysLastContactToPackage: number | null;
   totalSubscriptions: number;
   totalFirstPurchases: number;
   totalPackagePurchases: number;
@@ -38,59 +39,16 @@ export function CycleMetricsCard({ metrics }: CycleMetricsCardProps) {
         <CardDescription>Average time between key milestones</CardDescription>
       </CardHeader>
       <CardContent>
-        <div className="space-y-6">
-          {/* Primary Metrics */}
-          <div>
-            <h4 className="text-sm font-medium text-gray-700 mb-3">Conversion Times</h4>
-            <div className="grid grid-cols-2 gap-4">
-              <div className="bg-gray-50 rounded-lg p-3">
-                <p className="text-xs text-gray-500">Subscription → First Purchase</p>
-                <p className="text-lg font-bold text-gray-900">{formatDays(metrics.avgDaysToFirstPurchase)}</p>
-                <p className="text-xs text-gray-400">Median: {formatDays(metrics.medianDaysToFirstPurchase)}</p>
-              </div>
-              <div className="bg-gray-50 rounded-lg p-3">
-                <p className="text-xs text-gray-500">First → Package Purchase</p>
-                <p className="text-lg font-bold text-gray-900">{formatDays(metrics.avgDaysFirstToPackage)}</p>
-                <p className="text-xs text-gray-400">Median: {formatDays(metrics.medianDaysFirstToPackage)}</p>
-              </div>
-            </div>
+        <div className="grid grid-cols-2 gap-4">
+          <div className="bg-gray-50 rounded-lg p-3">
+            <p className="text-xs text-gray-500">Subscription → First Purchase</p>
+            <p className="text-lg font-bold text-gray-900">{formatDays(metrics.avgDaysToFirstPurchase)}</p>
+            <p className="text-xs text-gray-400">Median: {formatDays(metrics.medianDaysToFirstPurchase)}</p>
           </div>
-
-          {/* Secondary Metrics */}
-          <div>
-            <h4 className="text-sm font-medium text-gray-700 mb-3">Engagement Metrics</h4>
-            <div className="grid grid-cols-2 gap-4">
-              <div className="bg-gray-50 rounded-lg p-3">
-                <p className="text-xs text-gray-500">Last Contact → Package</p>
-                <p className="text-lg font-bold text-gray-900">{formatDays(metrics.avgDaysLastContactToPackage)}</p>
-              </div>
-              <div className="bg-gray-50 rounded-lg p-3">
-                <p className="text-xs text-gray-500">Total Journey (Sub → Package)</p>
-                <p className="text-lg font-bold text-gray-900">{formatDays(metrics.avgDaysEngaged)}</p>
-                <p className="text-xs text-gray-400">For buyers only</p>
-              </div>
-            </div>
-          </div>
-
-          {/* Conversion Rates */}
-          <div className="border-t pt-4">
-            <h4 className="text-sm font-medium text-gray-700 mb-3">Conversion Rates</h4>
-            <div className="grid grid-cols-3 gap-4 text-center">
-              <div>
-                <p className="text-xs text-gray-500">Total Contacts</p>
-                <p className="text-lg font-bold">{metrics.totalSubscriptions}</p>
-              </div>
-              <div>
-                <p className="text-xs text-gray-500">First Purchase</p>
-                <p className="text-lg font-bold">{metrics.totalFirstPurchases}</p>
-                <p className="text-xs text-gray-400">{formatPercent(metrics.firstPurchaseRate)}</p>
-              </div>
-              <div>
-                <p className="text-xs text-gray-500">Package</p>
-                <p className="text-lg font-bold">{metrics.totalPackagePurchases}</p>
-                <p className="text-xs text-gray-400">{formatPercent(metrics.packagePurchaseRate)}</p>
-              </div>
-            </div>
+          <div className="bg-gray-50 rounded-lg p-3">
+            <p className="text-xs text-gray-500">Last Contact → Package</p>
+            <p className="text-lg font-bold text-gray-900">{formatDays(metrics.avgDaysLastContactToPackage)}</p>
+            <p className="text-xs text-gray-400">Median: {formatDays(metrics.medianDaysLastContactToPackage)}</p>
           </div>
         </div>
       </CardContent>
@@ -155,6 +113,7 @@ export function calculateCycleMetrics(contacts: any[]): CycleMetrics {
     avgDaysEngaged: avg(daysEngaged),
     medianDaysToFirstPurchase: median(daysToFirstPurchase),
     medianDaysFirstToPackage: median(daysFirstToPackage),
+    medianDaysLastContactToPackage: median(daysLastContactToPackage),
     totalSubscriptions: validContacts.length,
     totalFirstPurchases,
     totalPackagePurchases,
