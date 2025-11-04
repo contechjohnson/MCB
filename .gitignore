@@ -1,46 +1,44 @@
-# See https://help.github.com/articles/ignoring-files/ for more about ignoring files.
-
-# dependencies
+# Dependencies
 /node_modules
 /.pnp
 .pnp.js
 
-# testing
+# Testing
 /coverage
 
-# next.js
+# Next.js
 /.next/
 /out/
 
-# production
+# Production
 /build
 
-# misc
+# Misc
 .DS_Store
 *.pem
 
-# debug
+# Debug
 npm-debug.log*
 yarn-debug.log*
 yarn-error.log*
 
-# local env files
+# Environment files (NEVER commit secrets!)
 .env*.local
 .env
 
-# vercel
+# Vercel
 .vercel
 
-# typescript
+# TypeScript
 *.tsbuildinfo
 next-env.d.ts
 
-# data files
-sheet-data.csv
-*.csv
+# Archive folder (old code, kept locally but not in git)
+_archive_*/
 
-# test files
-test-*.js
-seed-*.js
-fix-*.js
-import-*.js
+# Import folder
+/import
+
+# CSV files everywhere EXCEPT historical_data
+*.csv
+!historical_data/*.csv

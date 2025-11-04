@@ -1,6 +1,6 @@
 {
-  "name": "mcb-app",
-  "version": "0.1.0",
+  "name": "mcb-data-collection",
+  "version": "1.0.0",
   "private": true,
   "scripts": {
     "dev": "next dev --turbopack",
@@ -11,12 +11,10 @@
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.54.0",
-    "dotenv": "^17.2.1",
     "next": "15.4.6",
-    "openai": "^5.12.2",
     "react": "19.1.0",
     "react-dom": "19.1.0",
-    "stripe": "^18.4.0"
+    "stripe": "^18.5.0"
   },
   "devDependencies": {
     "@eslint/eslintrc": "^3",

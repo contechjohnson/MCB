@@ -1,0 +1,22 @@
+# Project Context Rules for AI Assistants
+
+## ALWAYS READ THESE FILES FIRST
+- START_HERE.md - Current project status
+- CLAUDE.md - Development guide
+- SCHEMA_V2_README.md - Database schema
+
+## Current Phase
+Schema v2.0 migration ready. Next: Run migration, build webhooks.
+
+## Key Context
+- This is a data collection system (not a dashboard)
+- User does "vibe coding" - explain things simply
+- Always use Firecrawl for web tasks
+- Supabase MCP is installed for easy DB access
+- Old code archived in _archive_2025_11_02/
+
+## Immediate Goals
+1. Test Supabase MCP
+2. Run schema_v2.sql migration
+3. Build webhook endpoints
+4. Set up automated reporting

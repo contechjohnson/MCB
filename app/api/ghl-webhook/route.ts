@@ -1,353 +1,250 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createClient } from '@supabase/supabase-js';
 
-// Initialize Supabase admin client
+// Admin client for bypassing RLS
 const supabaseAdmin = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_URL!,
   process.env.SUPABASE_SERVICE_ROLE_KEY!,
   { auth: { persistSession: false } }
 );
 
-// Helper to normalize phone numbers to E.164 format
-function normalizePhoneNumber(phone: string | null | undefined): string | null {
-  if (!phone) return null;
-  
-  // Remove all non-digit characters
-  let cleaned = phone.replace(/\D/g, '');
-  
-  // Handle different formats
-  if (cleaned.length === 10) {
-    // US number without country code - add +1
-    return '+1' + cleaned;
-  } else if (cleaned.length === 11 && cleaned.startsWith('1')) {
-    // US number with country code - add +
-    return '+' + cleaned;
-  } else if (phone.startsWith('+')) {
-    // Already in E.164 format
-    return phone;
-  } else if (cleaned.length > 10) {
-    // International number - add +
-    return '+' + cleaned;
-  }
-  
-  // Return the original if we can't determine format
-  console.log(`Warning: Could not normalize phone number: ${phone}`);
-  return phone;
-}
-
-// Helper to find or create contact
-async function findOrCreateContact(email: string, firstName?: string, lastName?: string, phone?: string) {
-  if (!email) {
-    console.error('No email provided to findOrCreateContact');
-    return null;
-  }
-  
-  // Normalize email for case-insensitive matching
-  const normalizedEmail = email.toLowerCase().trim();
-  
-  console.log(`Looking for contact with email: ${normalizedEmail}`);
-  
-  // Try to find existing contact with case-insensitive email match
-  const { data: existingContacts, error: searchError } = await supabaseAdmin
-    .from('contacts')
-    .select('*')
-    .ilike('email_address', normalizedEmail);
-  
-  if (searchError) {
-    console.error('Error searching for contact:', searchError);
-    return null;
-  }
-  
-  if (existingContacts && existingContacts.length > 0) {
-    console.log(`Found ${existingContacts.length} existing contact(s) for email: ${normalizedEmail}`);
-    return existingContacts[0]; // Return the first match
-  }
-  
-  // Contact doesn't exist, create a new one
-  console.log(`No contact found for email: ${normalizedEmail}, creating new contact`);
-  
-  // Generate a unique user_id (you might want to adjust this based on your system)
-  const newUserId = `ghl_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
-  
-  const newContact = {
-    user_id: newUserId,
-    email_address: normalizedEmail,
-    first_name: firstName || null,
-    last_name: lastName || null,
-    phone_number: normalizePhoneNumber(phone),
-    // Set initial stage
-    stage: 'LEAD_CONTACT',
-    // Set channel as unknown since it's coming from GHL
-    ig_or_fb: 'Unknown',
-    // Set source as paid since they're in GHL pipeline
-    paid_vs_organic: 'PAID',
-    // Set timestamps
-    created_at: new Date().toISOString(),
-    updated_at: new Date().toISOString(),
-    subscription_date: new Date().toISOString(),
-    // Set lead_contact to true since we have email
-    lead_contact: true,
-  };
-  
-  const { data: createdContact, error: createError } = await supabaseAdmin
-    .from('contacts')
-    .insert(newContact)
-    .select()
-    .single();
-  
-  if (createError) {
-    console.error('Error creating contact:', createError);
-    return null;
-  }
-  
-  console.log(`Successfully created new contact with user_id: ${newUserId}`);
-  return createdContact;
-}
-
-// Process events from GoHighLevel (booked, attended, sent_package)
-async function processGHLWebhook(payload: any) {
-  // Extract data from the payload - handles multiple formats
-  const email = payload.email || payload.contact?.email || payload.Email || payload.EMAIL;
-  const phone = payload.phone || payload.contact?.phone || payload.Phone || payload.PHONE || payload.phone_number;
-  const firstName = payload.first_name || payload.firstName || payload.contact?.first_name || payload.FirstName || payload.FIRST_NAME;
-  const lastName = payload.last_name || payload.lastName || payload.contact?.last_name || payload.LastName || payload.LAST_NAME;
-  const stage = payload.stage || payload.Stage || payload.STAGE || 'attended';
-  
-  // Extract country for A2P compliance (required by GHL for US/Canada)
-  const country = payload.country || payload.Country || payload.COUNTRY || 'US';
-  
-  // Extract booking date/time for booked stage
-  const bookingDate = payload.booking_date || payload.bookingDate || payload.booking_datetime || 
-                      payload.appointment_date || payload.appointmentDate || payload.scheduled_date;
-  
-  // Use appropriate timestamp based on stage
-  const eventTimestamp = payload.attended_at || payload.event_date || new Date().toISOString();
-  
-  console.log('Processing GHL webhook with data:', {
-    email,
-    phone,
-    firstName,
-    lastName,
-    stage,
-    country,
-    bookingDate
-  });
-  
-  if (!email) {
-    console.error('No email provided in GHL webhook payload');
-    return { 
-      success: false, 
-      message: 'Email is required',
-      debug: 'No email found in payload'
-    };
-  }
-  
-  // Find or create the contact
-  const contact = await findOrCreateContact(email, firstName, lastName, phone);
-  
-  if (!contact) {
-    console.error(`Failed to find or create contact for email: ${email}`);
-    return { 
-      success: false, 
-      message: 'Failed to process contact',
-      debug: `Could not find or create contact with email: ${email}`
-    };
-  }
-  
-  // Prepare the update data
-  const updateData: any = {
-    updated_at: new Date().toISOString(),
-    last_interaction_date: eventTimestamp,
-  };
-  
-  // Update phone number if provided (always update if provided from GHL)
-  if (phone) {
-    const normalizedPhone = normalizePhoneNumber(phone);
-    updateData.phone_number = normalizedPhone;
-    console.log(`Updating phone number from ${phone} to: ${normalizedPhone}`);
-  }
-  
-  // Update names if provided (always update if provided from GHL)
-  if (firstName) {
-    updateData.first_name = firstName;
-  }
-  if (lastName) {
-    updateData.last_name = lastName;
-  }
-  
-  // Update booking date if provided (for booked stage)
-  if (bookingDate) {
-    updateData.booking_date = new Date(bookingDate).toISOString();
-    console.log(`Setting booking date to: ${updateData.booking_date}`);
-  }
-  
-  // Determine progression flags based on the stage
-  let progressionFlags: any = {};
-  
-  // Handle different stages with proper hierarchy
-  const normalizedStage = stage.toLowerCase();
-  
-  // Stage hierarchy: BOOKED < ATTENDED < SENT_PACKAGE < BOUGHT_PACKAGE
-  // We never downgrade a contact's stage
-  
-  if (normalizedStage === 'sent_package' || normalizedStage === 'package_sent') {
-    // SENT_PACKAGE - Highest stage we handle via webhook
-    progressionFlags = {
-      lead: true,
-      lead_contact: true,
-      has_symptoms: true,
-      has_months_postpartum: true,
-      sent_link: true,
-      clicked_link: true,
-      booked: true,
-      attended: true,
-      sent_package: true,
-    };
-    // Only update stage if not already at BOUGHT_PACKAGE
-    if (!contact.bought_package) {
-      updateData.stage = 'SENT_PACKAGE';
-    }
-  } else if (normalizedStage === 'attended' || normalizedStage === 'appointment_attended' || normalizedStage === 'discovery_call_attended') {
-    // ATTENDED - Middle stage
-    progressionFlags = {
-      lead: true,
-      lead_contact: true,
-      has_symptoms: true,
-      has_months_postpartum: true,
-      sent_link: true,
-      clicked_link: true,
-      booked: true,
-      attended: true,
-    };
-    // Only update stage if currently lower than ATTENDED
-    if (!contact.attended && !contact.sent_package && !contact.bought_package) {
-      updateData.stage = 'ATTENDED';
-    }
-  } else if (normalizedStage === 'booked' || normalizedStage === 'appointment_booked' || normalizedStage === 'scheduled') {
-    // BOOKED - Entry stage from GHL
-    progressionFlags = {
-      lead: true,
-      lead_contact: true,
-      sent_link: true,
-      clicked_link: true,
-      booked: true,
-    };
-    // Only update stage if currently lower than BOOKED
-    if (!contact.booked && !contact.attended && !contact.sent_package && !contact.bought_package) {
-      updateData.stage = 'BOOKED';
-    }
-  } else {
-    // Unknown stage - log it but still process as a lead update
-    console.log(`Unknown stage received: ${stage}`);
-    progressionFlags = {
-      lead: true,
-      lead_contact: true,
-    };
-  }
-  
-  // Only update flags that aren't already true
-  Object.entries(progressionFlags).forEach(([flag, value]) => {
-    if (!contact[flag]) {
-      updateData[flag] = value;
-    }
-  });
-  
-  // Update the contact in Supabase
-  const { error: updateError } = await supabaseAdmin
-    .from('contacts')
-    .update(updateData)
-    .eq('user_id', contact.user_id);
-  
-  if (updateError) {
-    console.error('Error updating contact:', updateError);
-    return { 
-      success: false, 
-      message: 'Failed to update contact',
-      debug: updateError.message
-    };
-  }
-  
-  console.log(`Successfully updated contact ${contact.user_id} (${email}) for GHL event`);
-  return { 
-    success: true, 
-    message: 'Contact updated successfully',
-    contact_id: contact.user_id,
-    email: email,
-    updates: Object.keys(updateData),
-    was_created: !contact.created_at || contact.created_at === updateData.created_at
-  };
-}
-
+/**
+ * GoHighLevel Webhook Handler
+ *
+ * Handles events from GHL:
+ * - opportunity_created: New booking/opportunity
+ * - opportunity_status_change: Meeting attended, package sent, etc.
+ *
+ * Strategy: Find existing contact by email OR create new one
+ * This handles both:
+ * 1. ManyChat contacts who booked (link MC → GHL)
+ * 2. Direct-to-funnel contacts (create with GHL_ID)
+ */
 export async function POST(request: NextRequest) {
   try {
     const body = await request.json();
-    
-    console.log('GHL Webhook received:', JSON.stringify(body, null, 2));
-    
-    // Log all webhook events for debugging
-    await supabaseAdmin
-      .from('webhook_logs')
-      .insert({
-        source: 'ghl',
-        payload: body,
-        created_at: new Date().toISOString()
-      });
-    
-    // Handle different webhook event types from GHL
-    const eventType = body.event_type || body.type || body.eventType || 'discovery_call_attended';
-    
-    // Process the webhook regardless of event type
-    const result = await processGHLWebhook(body);
-    
-    // Return appropriate status code
-    if (result.success) {
-      return NextResponse.json(result, { status: 200 });
-    } else {
-      // Return 200 even for "not found" to prevent GHL from retrying
-      // But include error details in the response
-      return NextResponse.json(result, { status: 200 });
+
+    console.log('GHL webhook received:', {
+      event: body.type,
+      contact_id: body.contact_id,
+      timestamp: new Date().toISOString()
+    });
+
+    // Extract data from webhook
+    const ghlContactId = body.contact_id;
+    const eventType = body.type; // 'OpportunityCreate', 'OpportunityStageUpdate', etc.
+    const email = body.email?.toLowerCase().trim();
+    const phone = normalizePhone(body.phone);
+
+    if (!ghlContactId) {
+      console.error('No contact_id in GHL webhook');
+      return NextResponse.json({ error: 'Missing contact_id' }, { status: 200 });
     }
-    
+
+    // Log the webhook
+    await supabaseAdmin.from('webhook_logs').insert({
+      source: 'ghl',
+      event_type: eventType,
+      GHL_ID: ghlContactId,
+      payload: body,
+      status: 'received'
+    });
+
+    // Find or create contact using smart matching
+    const contactId = await findOrCreateContactGHL({
+      ghlId: ghlContactId,
+      email: email,
+      phone: phone,
+      firstName: body.first_name,
+      lastName: body.last_name
+    });
+
+    // Build update data based on event
+    const updateData = buildGHLUpdateData(eventType, body);
+
+    const { error: updateError } = await supabaseAdmin
+      .from('contacts')
+      .update(updateData)
+      .eq('id', contactId);
+
+    if (updateError) {
+      console.error('Error updating contact:', updateError);
+      await supabaseAdmin.from('webhook_logs').insert({
+        source: 'ghl',
+        event_type: eventType,
+        GHL_ID: ghlContactId,
+        payload: body,
+        status: 'error',
+        error_message: updateError.message
+      });
+      return NextResponse.json({ error: updateError.message }, { status: 200 });
+    }
+
+    console.log(`Successfully processed ${eventType} for GHL contact ${ghlContactId}`);
+
+    // Update webhook log
+    await supabaseAdmin.from('webhook_logs').insert({
+      source: 'ghl',
+      event_type: eventType,
+      GHL_ID: ghlContactId,
+      contact_id: contactId,
+      payload: body,
+      status: 'processed'
+    });
+
+    return NextResponse.json({
+      success: true,
+      contact_id: contactId,
+      event_type: eventType
+    }, { status: 200 });
+
   } catch (error) {
     console.error('GHL webhook error:', error);
-    // Return 200 to prevent retries, but indicate error in response
-    return NextResponse.json(
-      { 
-        success: false, 
-        message: 'Internal server error',
-        debug: error instanceof Error ? error.message : 'Unknown error'
-      },
-      { status: 200 }
-    );
+    return NextResponse.json({
+      error: 'Internal server error',
+      message: error instanceof Error ? error.message : 'Unknown error'
+    }, { status: 200 });
   }
 }
 
-// Also handle GET requests for webhook verification
-export async function GET(request: NextRequest) {
-  // GHL might send a verification request
-  const searchParams = request.nextUrl.searchParams;
-  const challenge = searchParams.get('challenge');
-  
-  if (challenge) {
-    // Echo back the challenge for verification
-    return NextResponse.json({ challenge });
-  }
-  
-  // Test endpoint to check if webhook is working
-  return NextResponse.json({ 
+/**
+ * GET handler for testing
+ */
+export async function GET() {
+  return NextResponse.json({
     status: 'ok',
-    message: 'GHL webhook endpoint is active',
-    endpoint: '/api/ghl-webhook',
-    accepts: ['discovery_call_attended', 'appointment_completed', 'call_completed', 'sent_package'],
-    expectedFields: {
-      required: ['email'],
-      optional: ['first_name', 'last_name', 'phone', 'stage']
-    },
-    notes: [
-      'Contact will be created if not found',
-      'Email matching is case-insensitive',
-      'Phone numbers will be updated if provided',
-      'Returns 200 status to prevent retries'
-    ]
+    message: 'GoHighLevel webhook endpoint is live',
+    endpoints: {
+      POST: 'Receives GHL webhooks',
+      events: ['OpportunityCreate', 'OpportunityStageUpdate']
+    }
   });
+}
+
+/**
+ * Find existing contact or create new one
+ * Uses smart matching: GHL_ID > Email > Phone
+ */
+async function findOrCreateContactGHL(data: {
+  ghlId: string;
+  email?: string;
+  phone?: string;
+  firstName?: string;
+  lastName?: string;
+}): Promise<string> {
+  // Try smart finder (checks GHL_ID, email, phone)
+  const { data: existingId } = await supabaseAdmin
+    .rpc('find_contact_smart', {
+      search_ghl_id: data.ghlId,
+      search_email: data.email || null,
+      search_phone: data.phone || null
+    });
+
+  if (existingId) {
+    // Found existing contact - ensure GHL_ID is set (might be ManyChat contact)
+    await supabaseAdmin
+      .from('contacts')
+      .update({ GHL_ID: data.ghlId })
+      .eq('id', existingId)
+      .is('GHL_ID', null); // Only update if not already set
+
+    return existingId;
+  }
+
+  // Create new contact (direct-to-funnel case)
+  const { data: newContact, error } = await supabaseAdmin
+    .from('contacts')
+    .insert({
+      GHL_ID: data.ghlId,
+      email_primary: data.email || null,
+      phone: data.phone || null,
+      first_name: data.firstName || null,
+      last_name: data.lastName || null,
+      stage: 'form_submitted'
+    })
+    .select('id')
+    .single();
+
+  if (error) {
+    throw new Error(`Failed to create contact: ${error.message}`);
+  }
+
+  return newContact.id;
+}
+
+/**
+ * Build update data based on GHL event type
+ */
+function buildGHLUpdateData(eventType: string, body: any) {
+  const baseData: any = {
+    email_booking: body.email?.toLowerCase().trim() || null,
+    phone: normalizePhone(body.phone) || null,
+    first_name: body.first_name || null,
+    last_name: body.last_name || null,
+    updated_at: new Date().toISOString()
+  };
+
+  // Opportunity/booking events
+  if (eventType === 'OpportunityCreate' || eventType.includes('Opportunity')) {
+    const stage = body.opportunity_stage?.toLowerCase();
+    const appointmentTime = body.appointment_start_time;
+
+    // Common booking data
+    const opportunityData = {
+      ...baseData,
+      form_submit_date: new Date().toISOString()
+    };
+
+    // Stage-specific updates
+    if (appointmentTime) {
+      opportunityData.meeting_book_date = new Date(appointmentTime).toISOString();
+      opportunityData.stage = 'meeting_booked';
+    }
+
+    if (stage?.includes('attended') || stage?.includes('show')) {
+      opportunityData.meeting_held_date = new Date().toISOString();
+      opportunityData.stage = 'meeting_held';
+    }
+
+    if (stage?.includes('package') || stage?.includes('sent')) {
+      opportunityData.stage = 'package_sent';
+    }
+
+    return opportunityData;
+  }
+
+  // Contact created/updated
+  if (eventType === 'ContactCreate' || eventType === 'ContactUpdate') {
+    return {
+      ...baseData,
+      stage: 'form_submitted'
+    };
+  }
+
+  // Default: just update base data
+  return baseData;
+}
+
+/**
+ * Normalize phone number to E.164 format (or at least consistent format)
+ * Removes formatting, keeps just digits with country code
+ */
+function normalizePhone(phone?: string): string | null {
+  if (!phone) return null;
+
+  // Remove all non-digits
+  const digits = phone.replace(/\D/g, '');
+
+  // If it's 10 digits, assume US and add +1
+  if (digits.length === 10) {
+    return `+1${digits}`;
+  }
+
+  // If it's 11 digits starting with 1, add +
+  if (digits.length === 11 && digits.startsWith('1')) {
+    return `+${digits}`;
+  }
+
+  // Otherwise return with + prefix
+  return digits.length > 0 ? `+${digits}` : null;
 }
