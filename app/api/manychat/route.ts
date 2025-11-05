@@ -236,19 +236,29 @@ async function findOrCreateContact(subscriberId: string): Promise<string> {
 function buildUpdateData(eventType: string | null, manychatData: any) {
   const customFields = manychatData.custom_fields || {};
 
-  // Base data (always update)
+  // Base data (always update every time - freshest data wins)
   const baseData: any = {
     first_name: manychatData.first_name || null,
     last_name: manychatData.last_name || null,
     email_primary: manychatData.email || customFields['custom field email'] || customFields.MCB_SEARCH_EMAIL || null,
     phone: manychatData.phone || manychatData.whatsapp_phone || null,
     IG: manychatData.ig_username || manychatData.instagram_username || null,
+    ig_id: manychatData.ig_id || null,
     FB: manychatData.name || null,
     AD_ID: customFields.AD_ID || customFields.ADID || null,
     chatbot_AB: customFields.chatbot_AB || customFields['Chatbot AB Test'] || null,
     thread_ID: customFields.thread_id || customFields['Conversation ID'] || null,
-    trigger_word: customFields.trigger_word || null,
+    trigger_word: customFields.trigger_word || customFields['All Tags'] || null,
+    subscribed: manychatData.subscribed || null,
+    ig_last_interaction: manychatData.ig_last_interaction || null,
     updated_at: new Date().toISOString()
+  };
+
+  // Question fields (update on ALL events - answers might change!)
+  const questionFields: any = {
+    Q1_question: customFields['Months Postpartum'] || customFields['How Far Postpartum'] || null,
+    Q2_question: customFields.Symptoms || null,
+    objections: customFields.Objections || null
   };
 
   // Map ManyChat's DATE_* custom fields to database columns
@@ -281,8 +291,9 @@ function buildUpdateData(eventType: string | null, manychatData: any) {
     case 'contact_created':
       return {
         ...baseData,
+        ...questionFields,  // Include Q1, Q2, objections
         ...dateFields,
-        subscribe_date: customFields.subscribed_date || manychatData.subscribed || new Date().toISOString(),
+        subscribe_date: new Date().toISOString(),  // Webhook timestamp
         stage: 'new_lead'
       };
 
@@ -290,29 +301,28 @@ function buildUpdateData(eventType: string | null, manychatData: any) {
       // They answered BOTH questions (final state)
       return {
         ...baseData,
+        ...questionFields,  // Include Q1, Q2, objections
         ...dateFields,
-        Q1_question: customFields['Months Postpartum'] || customFields['How Far Postpartum'] || null,
-        Q2_question: customFields.Symptoms || null,
-        objections: customFields.Objections || null,
         lead_summary: customFields['Cody > Response'] || null,
-        thread_ID: customFields['Conversation ID'] || null,
-        DM_qualified_date: customFields.DATE_DM_QUALIFIED || new Date().toISOString(),
+        DM_qualified_date: new Date().toISOString(),  // Webhook timestamp
         stage: 'DM_qualified'
       };
 
     case 'link_sent':
       return {
         ...baseData,
+        ...questionFields,  // Include Q1, Q2, objections (might have changed!)
         ...dateFields,
-        link_send_date: customFields.DATE_LINK_SENT || new Date().toISOString(),
+        link_send_date: new Date().toISOString(),  // Webhook timestamp
         stage: 'landing_link_sent'
       };
 
     case 'link_clicked':
       return {
         ...baseData,
+        ...questionFields,  // Include Q1, Q2, objections (might have changed!)
         ...dateFields,
-        link_click_date: customFields.DATE_LINK_CLICKED || new Date().toISOString(),
+        link_click_date: new Date().toISOString(),  // Webhook timestamp
         stage: 'landing_link_clicked'
       };
 
@@ -320,12 +330,9 @@ function buildUpdateData(eventType: string | null, manychatData: any) {
       // Unknown event or contact_update - just update all available data
       return {
         ...baseData,
+        ...questionFields,
         ...dateFields,
-        Q1_question: customFields['Months Postpartum'] || customFields['How Far Postpartum'] || null,
-        Q2_question: customFields.Symptoms || null,
-        objections: customFields.Objections || null,
-        lead_summary: customFields['Cody > Response'] || null,
-        thread_ID: customFields['Conversation ID'] || null
+        lead_summary: customFields['Cody > Response'] || null
       };
   }
 }
