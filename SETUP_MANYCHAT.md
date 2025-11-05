@@ -17,10 +17,8 @@ http://localhost:3001/api/manychat
 
 **Production (after deploying to Vercel):**
 ```
-https://your-app-name.vercel.app/api/manychat
+https://mcb-dun.vercel.app/api/manychat
 ```
-
-Replace `your-app-name` with your actual Vercel app name.
 
 ---
 
@@ -36,7 +34,7 @@ You need to add 4 webhook actions at specific points in your conversation flow:
 
 **Settings:**
 - Method: `POST`
-- URL: `https://your-app-name.vercel.app/api/manychat`
+- URL: `https://mcb-dun.vercel.app/api/manychat`
 - Headers: `Content-Type: application/json`
 - Body (copy exactly):
 ```json
@@ -56,7 +54,7 @@ You need to add 4 webhook actions at specific points in your conversation flow:
 
 **Settings:**
 - Method: `POST`
-- URL: `https://your-app-name.vercel.app/api/manychat`
+- URL: `https://mcb-dun.vercel.app/api/manychat`
 - Headers: `Content-Type: application/json`
 - Body (copy exactly):
 ```json
@@ -78,7 +76,7 @@ You need to add 4 webhook actions at specific points in your conversation flow:
 
 **Settings:**
 - Method: `POST`
-- URL: `https://your-app-name.vercel.app/api/manychat`
+- URL: `https://mcb-dun.vercel.app/api/manychat`
 - Headers: `Content-Type: application/json`
 - Body (copy exactly):
 ```json
@@ -108,7 +106,7 @@ You need to add 4 webhook actions at specific points in your conversation flow:
 
 **Webhook Settings:**
 - Method: `POST`
-- URL: `https://your-app-name.vercel.app/api/manychat`
+- URL: `https://mcb-dun.vercel.app/api/manychat`
 - Headers: `Content-Type: application/json`
 - Body (copy exactly):
 ```json
@@ -165,7 +163,7 @@ You should see:
 #### Route 1: Contact Created
 - **Filter:** `subscriber.last_input_text` exists (they sent first message)
 - **Webhook:** HTTP → Make a request
-  - URL: `https://your-app-name.vercel.app/api/manychat`
+  - URL: `https://mcb-dun.vercel.app/api/manychat`
   - Method: POST
   - Headers: `Content-Type: application/json`
   - Body:

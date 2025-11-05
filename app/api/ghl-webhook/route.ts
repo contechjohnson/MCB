@@ -22,17 +22,23 @@ const supabaseAdmin = createClient(
  */
 export async function POST(request: NextRequest) {
   try {
-    const body = await request.json();
+    let body = await request.json();
+
+    // Handle array payload
+    if (Array.isArray(body) && body.length > 0) {
+      body = body[0];
+    }
 
     console.log('GHL webhook received:', {
-      event: body.type,
-      contact_id: body.contact_id,
+      hasContactId: !!body.contact_id,
+      hasOpportunity: !!body.opportunity_name,
+      pipelineStage: body.pipleline_stage || body.pipeline_stage,
       timestamp: new Date().toISOString()
     });
 
     // Extract data from webhook
     const ghlContactId = body.contact_id;
-    const eventType = body.type; // 'OpportunityCreate', 'OpportunityStageUpdate', etc.
+    const eventType = body.type || determineEventTypeFromStage(body);
     const email = body.email?.toLowerCase().trim();
     const phone = normalizePhone(body.phone);
 
@@ -175,19 +181,46 @@ async function findOrCreateContactGHL(data: {
 /**
  * Build update data based on GHL event type
  */
+/**
+ * Determine event type from GHL pipeline stage
+ */
+function determineEventTypeFromStage(body: any): string {
+  const stage = (body.pipleline_stage || body.pipeline_stage || '').toLowerCase();
+
+  if (stage.includes('scheduled') || stage.includes('booked')) {
+    return 'OpportunityCreate';
+  }
+  if (stage.includes('completed') || stage.includes('attended')) {
+    return 'MeetingCompleted';
+  }
+  if (stage.includes('package') || stage.includes('sent')) {
+    return 'PackageSent';
+  }
+
+  return 'ContactUpdate';
+}
+
 function buildGHLUpdateData(eventType: string, body: any) {
+  // Extract custom data (where MC_ID, AD_ID, etc. live)
+  const customData = body.customData || {};
+  const customFields = body; // Custom fields are at root level in your payload
+
   const baseData: any = {
     email_booking: body.email?.toLowerCase().trim() || null,
     phone: normalizePhone(body.phone) || null,
     first_name: body.first_name || null,
     last_name: body.last_name || null,
+    // Capture MC_ID from custom data or root
+    MC_ID: customData.MC_ID || customFields.MC_ID || null,
+    AD_ID: customFields.AD_ID || null,
+    thread_ID: customFields.THREAD_ID || null,
     updated_at: new Date().toISOString()
   };
 
   // Opportunity/booking events
   if (eventType === 'OpportunityCreate' || eventType.includes('Opportunity')) {
-    const stage = body.opportunity_stage?.toLowerCase();
-    const appointmentTime = body.appointment_start_time;
+    const stage = (body.pipleline_stage || body.pipeline_stage || '').toLowerCase();
+    const appointmentTime = body['Discovery Call Time (EST)'] || body.appointment_start_time;
 
     // Common booking data
     const opportunityData = {
@@ -196,21 +229,46 @@ function buildGHLUpdateData(eventType: string, body: any) {
     };
 
     // Stage-specific updates
-    if (appointmentTime) {
-      opportunityData.meeting_book_date = new Date(appointmentTime).toISOString();
+    if (stage.includes('scheduled') || stage.includes('booked') || appointmentTime) {
+      if (appointmentTime) {
+        try {
+          opportunityData.meeting_book_date = new Date(appointmentTime).toISOString();
+        } catch {
+          opportunityData.meeting_book_date = new Date().toISOString();
+        }
+      } else {
+        opportunityData.meeting_book_date = new Date().toISOString();
+      }
       opportunityData.stage = 'meeting_booked';
     }
 
-    if (stage?.includes('attended') || stage?.includes('show')) {
+    if (stage.includes('completed') || stage.includes('attended') || stage.includes('show')) {
       opportunityData.meeting_held_date = new Date().toISOString();
       opportunityData.stage = 'meeting_held';
     }
 
-    if (stage?.includes('package') || stage?.includes('sent')) {
+    if (stage.includes('package') || stage.includes('sent')) {
       opportunityData.stage = 'package_sent';
     }
 
     return opportunityData;
+  }
+
+  // Meeting completed
+  if (eventType === 'MeetingCompleted') {
+    return {
+      ...baseData,
+      meeting_held_date: new Date().toISOString(),
+      stage: 'meeting_held'
+    };
+  }
+
+  // Package sent
+  if (eventType === 'PackageSent') {
+    return {
+      ...baseData,
+      stage: 'package_sent'
+    };
   }
 
   // Contact created/updated

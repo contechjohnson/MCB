@@ -32,9 +32,8 @@ STRIPE_SECRET_KEY=sk_test_your_key_here
 
 **Endpoint URL:**
 ```
-https://your-app-name.vercel.app/api/stripe-webhook
+https://mcb-dun.vercel.app/api/stripe-webhook
 ```
-Replace `your-app-name` with your Vercel app name.
 
 **Description (optional):**
 ```

@@ -6,16 +6,28 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## 🚨 CURRENT STATUS (Read This First!)
 
-**Date:** Nov 2, 2025, 10:00 PM
-**Phase:** Schema v2.0 ready, Supabase MCP installed, about to run migration
+**Date:** Nov 3, 2025, 10:45 PM
+**Phase:** ✅ WEBHOOKS BUILT & DEPLOYED - Ready for Platform Configuration
 
-**IMMEDIATE NEXT STEPS:**
-1. Test Supabase MCP works: "Show me all tables"
-2. Run migration: Execute `schema_v2.sql`
-3. Verify: Check new `contacts` table exists
-4. Then build webhooks
+**DEPLOYMENT STATUS:**
+- ✅ Schema v2.1 migrated to Supabase (UUID primary keys, flexible matching)
+- ✅ All 4 webhook endpoints built (ManyChat, GHL, Stripe, Denefits)
+- ✅ Code pushed to GitHub
+- ✅ Deployed to Vercel: `https://mcb-dun.vercel.app/`
+- ⏳ Waiting: Environment variables need to be added to Vercel
+- ⏳ Waiting: Webhooks need to be configured in each platform
 
-**Full context:** See `START_HERE.md` for complete project status
+**IMMEDIATE NEXT STEPS (Morning):**
+1. Follow `DEPLOYMENT_CHECKLIST.md` (start at Step 2)
+2. Add environment variables to Vercel (especially Stripe keys)
+3. Set up Stripe webhook (easiest, do first)
+4. Set up GHL webhook in workflows
+5. Set up ManyChat External Request blocks
+6. Update Denefits Make.com scenario URL
+
+**User Note:** ManyChat will pass full contact data in webhook payload (not use custom fields for dates). Webhook will map data appropriately on server side.
+
+**Full context:** See `START_HERE_WEBHOOKS.md` and `DEPLOYMENT_CHECKLIST.md`
 
 ---
 
@@ -34,23 +46,35 @@ The user is doing "vibe coding" - they understand the concepts but not all the t
 - If something breaks, explain what went wrong in plain English
 - Don't assume deep knowledge of Next.js, databases, or TypeScript
 
-## Project Structure (Clean Slate as of Nov 2, 2025)
+## Project Structure (Updated Nov 3, 2025)
 
 ```
 /app
-  /api              # All webhook endpoints live here
-  layout.tsx        # Basic Next.js layout
-  page.tsx          # Simple status page
+  /api
+    /manychat/route.ts        # ManyChat webhook (DM qualified, link tracking)
+    /ghl-webhook/route.ts     # GoHighLevel webhook (bookings, meetings)
+    /stripe-webhook/route.ts  # Stripe webhook (payments, refunds)
+    /denefits-webhook/route.ts # Denefits webhook (BNPL financing)
+  layout.tsx
+  page.tsx
 
-/historical_data    # CSV files and Airtable exports for analysis
-                    # These don't go in the database, just sit here
+/historical_data    # CSV files and Airtable exports (not in database)
 
-/_archive_2025_11_02/  # Old code (DON'T LOOK IN HERE)
+/Setup Guides       # Copy-paste guides for each platform
+  DEPLOYMENT_CHECKLIST.md    # Main deployment guide (START HERE)
+  START_HERE_WEBHOOKS.md     # Overview of webhook system
+  SETUP_STRIPE.md            # Stripe webhook setup (easiest)
+  SETUP_GHL.md               # GoHighLevel webhook setup
+  SETUP_MANYCHAT.md          # ManyChat webhook setup
+  SETUP_DENEFITS.md          # Denefits Make.com setup
+  WEBHOOK_GUIDE.md           # Technical reference
+  WEBHOOK_FLOW_DIAGRAM.md    # Visual flow diagrams
+
+/Schema Files
+  schema_v2.1.sql            # Current schema (UUID primary keys)
 
 .env.local        # Your secrets (not in git)
-package.json      # Dependencies
-next.config.ts    # Next.js settings
-tsconfig.json     # TypeScript settings
+package.json      # Dependencies (includes Stripe package)
 ```
 
 ## Development Commands

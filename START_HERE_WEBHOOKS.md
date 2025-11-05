@@ -98,21 +98,19 @@ Then **redeploy**.
 
 ### 3. Your Webhook URLs
 
-Replace `your-app-name` with your actual Vercel app:
-
 **ManyChat:**
 ```
-https://your-app-name.vercel.app/api/manychat
+https://mcb-dun.vercel.app/api/manychat
 ```
 
 **GoHighLevel:**
 ```
-https://your-app-name.vercel.app/api/ghl-webhook
+https://mcb-dun.vercel.app/api/ghl-webhook
 ```
 
 **Stripe:**
 ```
-https://your-app-name.vercel.app/api/stripe-webhook
+https://mcb-dun.vercel.app/api/stripe-webhook
 ```
 
 ---

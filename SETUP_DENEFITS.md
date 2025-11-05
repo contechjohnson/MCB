@@ -29,23 +29,32 @@ Find your existing "Denefits → Database" scenario
 
 Find the HTTP module (where you send data) and change URL to:
 ```
-https://your-app-name.vercel.app/api/denefits-webhook
+https://mcb-dun.vercel.app/api/denefits-webhook
 ```
 
 ### Step 3: Update the Body
 
-Make sure the body includes:
+Make sure the body matches the actual Denefits payload structure:
 ```json
 {
-  "event_type": "{{event.type}}",
-  "customer_email": "{{customer.email}}",
-  "amount": "{{plan.amount}}",
-  "customer_id": "{{customer.id}}",
-  "plan_id": "{{plan.id}}"
+  "webhook_type": "{{webhook_type}}",
+  "data": {
+    "contract": {
+      "customer_email": "{{data.contract.customer_email}}",
+      "customer_first_name": "{{data.contract.customer_first_name}}",
+      "customer_last_name": "{{data.contract.customer_last_name}}",
+      "customer_mobile": "{{data.contract.customer_mobile}}",
+      "financed_amount": "{{data.contract.financed_amount}}",
+      "contract_id": "{{data.contract.contract_id}}",
+      "contract_code": "{{data.contract.contract_code}}",
+      "contract_status": "{{data.contract.contract_status}}",
+      "date_added": "{{data.contract.date_added}}"
+    }
+  }
 }
 ```
 
-**Adjust field names** based on what Denefits actually sends.
+**Note:** Currently using `financed_amount` (the total they're financing). You can adjust if needed.
 
 ### Step 4: Test It
 
@@ -71,7 +80,7 @@ SELECT * FROM contacts WHERE purchase_date IS NOT NULL ORDER BY created_at DESC;
 
 **Webhook URL:**
 ```
-https://your-app-name.vercel.app/api/denefits-webhook
+https://mcb-dun.vercel.app/api/denefits-webhook
 ```
 
 **Events to Subscribe:**
@@ -152,19 +161,29 @@ case 'payment_plan_created':  // ← Replace with actual event name
 
 ### Step 3: Test with Sample Payload
 
-Create a test file:
+Create a test file with the ACTUAL Denefits payload structure:
 
 ```bash
 # test-denefits.sh
 curl -X POST http://localhost:3001/api/denefits-webhook \
   -H "Content-Type: application/json" \
-  -d '{
-    "event_type": "payment_plan_created",
-    "customer_email": "test@example.com",
-    "amount": 997,
-    "customer_id": "denefits_cust_123",
-    "plan_id": "plan_456"
-  }'
+  -d '[{
+    "webhook_type": "contract.payments.recurring_payment",
+    "data": {
+      "contract": {
+        "customer_email": "test@example.com",
+        "customer_first_name": "Test",
+        "customer_last_name": "User",
+        "customer_mobile": "6162831574",
+        "financed_amount": 1497,
+        "contract_id": 136294,
+        "contract_code": "TESTCODE123",
+        "contract_status": "Active",
+        "date_added": "2025-11-04T16:28:57.000Z"
+      }
+    },
+    "secret_key": "key_x9nnpj3cw4103ed"
+  }]'
 ```
 
 Run it:

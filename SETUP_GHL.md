@@ -10,10 +10,8 @@
 
 **Production (use this one):**
 ```
-https://your-app-name.vercel.app/api/ghl-webhook
+https://mcb-dun.vercel.app/api/ghl-webhook
 ```
-
-Replace `your-app-name` with your actual Vercel app name.
 
 ---
 
@@ -36,7 +34,7 @@ Replace `your-app-name` with your actual Vercel app name.
 
 **Webhook Settings:**
 - Method: `POST`
-- Webhook URL: `https://your-app-name.vercel.app/api/ghl-webhook`
+- Webhook URL: `https://mcb-dun.vercel.app/api/ghl-webhook`
 
 **Request Body (copy exactly):**
 ```json
@@ -76,7 +74,7 @@ Replace `your-app-name` with your actual Vercel app name.
 
 **Webhook Settings:**
 - Method: `POST`
-- Webhook URL: `https://your-app-name.vercel.app/api/ghl-webhook`
+- Webhook URL: `https://mcb-dun.vercel.app/api/ghl-webhook`
 
 **Request Body (copy exactly):**
 ```json
@@ -152,7 +150,7 @@ Some GHL accounts have issues with custom webhooks. If that's you, use Make.com:
 **Module:** HTTP → Make a request
 
 **Settings:**
-- URL: `https://your-app-name.vercel.app/api/ghl-webhook`
+- URL: `https://mcb-dun.vercel.app/api/ghl-webhook`
 - Method: POST
 - Headers: `Content-Type: application/json`
 - Body Type: Raw
