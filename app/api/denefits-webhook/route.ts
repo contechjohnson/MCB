@@ -39,13 +39,18 @@ export async function POST(request: NextRequest) {
       status: 'received'
     });
 
-    // Extract data from webhook
-    // ADJUST THESE FIELD NAMES based on actual Denefits payload
-    const email = body.customer_email || body.email || body.customer?.email;
-    const amount = body.amount || body.total_amount || body.plan_amount || 0;
-    const eventType = body.event_type || body.type;
-    const customerId = body.customer_id || body.denefits_customer_id;
-    const planId = body.plan_id || body.payment_plan_id;
+    // Handle array payload (Denefits sends array)
+    let payload = body;
+    if (Array.isArray(body) && body.length > 0) {
+      payload = body[0];
+    }
+
+    // Extract contract details from Denefits payload
+    const contract = payload.data?.contract || payload;
+    const eventType = payload.webhook_type || payload.event_type || payload.type || 'contract.created';
+
+    // Extract email from nested structure
+    const email = contract.customer_email || payload.customer_email || payload.email || payload.customer?.email;
 
     if (!email) {
       console.error('No email in Denefits webhook');
@@ -63,11 +68,9 @@ export async function POST(request: NextRequest) {
     const { data: contactId } = await supabaseAdmin
       .rpc('find_contact_by_email', { search_email: email.toLowerCase().trim() });
 
-    // Extract contract details from Denefits payload
-    const contract = body.data?.contract || body;
     const contractId = contract.contract_id;
     const contractCode = contract.contract_code;
-    const financedAmount = parseFloat(contract.financed_amount || amount);
+    const financedAmount = parseFloat(contract.financed_amount || 0);
     const downpayment = parseFloat(contract.downpayment_amount || 0);
     const recurringAmount = parseFloat(contract.recurring_amount || 0);
     const numPayments = parseInt(contract.number_of_payments || 0);
