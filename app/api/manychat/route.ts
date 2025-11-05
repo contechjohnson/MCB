@@ -217,22 +217,19 @@ async function findOrCreateContact(subscriberId: string): Promise<string> {
     return existingId;
   }
 
-  // Create new contact
+  // Create new contact using raw SQL to bypass schema cache
   const { data: newContact, error } = await supabaseAdmin
-    .from('contacts')
-    .insert({
-      MC_ID: subscriberId,
-      subscribe_date: new Date().toISOString(),
-      stage: 'new_lead'
-    })
-    .select('id')
-    .single();
+    .rpc('create_contact_with_mc_id', {
+      mc_id: subscriberId,
+      sub_date: new Date().toISOString(),
+      contact_stage: 'new_lead'
+    });
 
   if (error) {
     throw new Error(`Failed to create contact: ${error.message}`);
   }
 
-  return newContact.id;
+  return newContact;
 }
 
 /**
