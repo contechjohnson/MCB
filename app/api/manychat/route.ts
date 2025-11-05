@@ -233,7 +233,7 @@ async function findOrCreateContact(subscriberId: string): Promise<string> {
 /**
  * Build update data based on event type and ManyChat data
  */
-function buildUpdateData(eventType: string, manychatData: any) {
+function buildUpdateData(eventType: string | null, manychatData: any) {
   const customFields = manychatData.custom_fields || {};
 
   // Base data (always update)
@@ -249,12 +249,38 @@ function buildUpdateData(eventType: string, manychatData: any) {
     updated_at: new Date().toISOString()
   };
 
+  // Map ManyChat's DATE_* custom fields to database columns
+  // These are datetime strings from ManyChat, use them if available
+  // Otherwise fall back to auto-generated timestamps based on event type
+  const dateFields: any = {};
+
+  if (customFields.DATE_LINK_SENT) {
+    dateFields.link_send_date = customFields.DATE_LINK_SENT;
+  }
+  if (customFields.DATE_LINK_CLICKED) {
+    dateFields.link_click_date = customFields.DATE_LINK_CLICKED;
+  }
+  if (customFields.DATE_FORM_FILLED) {
+    dateFields.form_submit_date = customFields.DATE_FORM_FILLED;
+  }
+  if (customFields.DATE_DM_QUALIFIED) {
+    dateFields.DM_qualified_date = customFields.DATE_DM_QUALIFIED;
+  }
+  if (customFields.DATE_MEETING_BOOKED) {
+    dateFields.appointment_date = customFields.DATE_MEETING_BOOKED;
+  }
+  if (customFields.DATE_MEETING_HELD) {
+    dateFields.appointment_held_date = customFields.DATE_MEETING_HELD;
+  }
+  // Note: DATE_PURCHASE is handled by Stripe/Denefits webhooks
+
   // Event-specific updates
   switch (eventType) {
     case 'contact_created':
       return {
         ...baseData,
-        subscribe_date: new Date().toISOString(),
+        ...dateFields,
+        subscribe_date: customFields.DATE_LINK_SENT || new Date().toISOString(),
         stage: 'new_lead'
       };
 
@@ -262,31 +288,42 @@ function buildUpdateData(eventType: string, manychatData: any) {
       // They answered BOTH questions (final state)
       return {
         ...baseData,
+        ...dateFields,
         Q1_question: customFields['Months Postpartum'] || customFields['How Far Postpartum'] || null,
         Q2_question: customFields.Symptoms || null,
         objections: customFields.Objections || null,
         lead_summary: customFields['Cody > Response'] || null,
         thread_ID: customFields['Conversation ID'] || null,
-        DM_qualified_date: new Date().toISOString(),
+        DM_qualified_date: customFields.DATE_DM_QUALIFIED || new Date().toISOString(),
         stage: 'DM_qualified'
       };
 
     case 'link_sent':
       return {
         ...baseData,
-        link_send_date: new Date().toISOString(),
+        ...dateFields,
+        link_send_date: customFields.DATE_LINK_SENT || new Date().toISOString(),
         stage: 'landing_link_sent'
       };
 
     case 'link_clicked':
       return {
         ...baseData,
-        link_click_date: new Date().toISOString(),
+        ...dateFields,
+        link_click_date: customFields.DATE_LINK_CLICKED || new Date().toISOString(),
         stage: 'landing_link_clicked'
       };
 
     default:
-      // Unknown event, just update base data
-      return baseData;
+      // Unknown event or contact_update - just update all available data
+      return {
+        ...baseData,
+        ...dateFields,
+        Q1_question: customFields['Months Postpartum'] || customFields['How Far Postpartum'] || null,
+        Q2_question: customFields.Symptoms || null,
+        objections: customFields.Objections || null,
+        lead_summary: customFields['Cody > Response'] || null,
+        thread_ID: customFields['Conversation ID'] || null
+      };
   }
 }

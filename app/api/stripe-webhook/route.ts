@@ -64,14 +64,14 @@ export async function POST(request: NextRequest) {
       status: 'received'
     });
 
-    // Check for duplicate events
-    const { data: existingEvent } = await supabaseAdmin
-      .from('stripe_events')
+    // Check for duplicate events (using payments table)
+    const { data: existingPayment } = await supabaseAdmin
+      .from('payments')
       .select('id')
-      .eq('event_id', event.id)
+      .eq('payment_event_id', event.id)
       .single();
 
-    if (existingEvent) {
+    if (existingPayment) {
       console.log('Duplicate Stripe event, skipping:', event.id);
       return NextResponse.json({ received: true, duplicate: true }, { status: 200 });
     }
@@ -187,17 +187,6 @@ async function handleCheckoutCompleted(event: Stripe.Event) {
     console.error('Error updating contact with purchase:', updateError);
   }
 
-  // Log Stripe event with contact link
-  await supabaseAdmin.from('stripe_events').insert({
-    event_id: event.id,
-    event_type: event.type,
-    customer_email: email,
-    contact_id: contactId,
-    amount: amount,
-    status: 'paid',
-    raw_event: event
-  });
-
   console.log(`Payment recorded for contact ${contactId}: $${amount}`);
 }
 
@@ -235,16 +224,6 @@ async function handleCheckoutExpired(event: Stripe.Event) {
   if (updateError) {
     console.error('Error updating contact with expired checkout:', updateError);
   }
-
-  // Log event
-  await supabaseAdmin.from('stripe_events').insert({
-    event_id: event.id,
-    event_type: event.type,
-    customer_email: email,
-    contact_id: contactId,
-    status: 'expired',
-    raw_event: event
-  });
 
   console.log(`Checkout expired for contact ${contactId}`);
 }
@@ -295,15 +274,18 @@ async function handleChargeRefunded(event: Stripe.Event) {
     console.error('Error updating contact with refund:', updateError);
   }
 
-  // Log event
-  await supabaseAdmin.from('stripe_events').insert({
-    event_id: event.id,
-    event_type: event.type,
-    customer_email: email,
+  // Log refund as negative payment
+  await supabaseAdmin.from('payments').insert({
     contact_id: contactId,
-    amount: refundAmount,
+    payment_event_id: event.id,
+    payment_source: 'stripe',
+    payment_type: 'refund',
+    customer_email: email,
+    amount: -refundAmount,  // Negative amount for refund
     status: 'refunded',
-    raw_event: event
+    payment_date: new Date(event.created * 1000).toISOString(),
+    stripe_event_type: event.type,
+    raw_payload: event
   });
 
   console.log(`Refund recorded for contact ${contactId}: $${refundAmount}`);
