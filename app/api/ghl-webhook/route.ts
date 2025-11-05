@@ -158,26 +158,23 @@ async function findOrCreateContactGHL(data: {
     return existingId;
   }
 
-  // Create new contact (direct-to-funnel case)
+  // Create new contact using function to bypass schema cache
   const { data: newContact, error } = await supabaseAdmin
-    .from('contacts')
-    .insert({
-      GHL_ID: data.ghlId,
-      email_primary: data.email || null,
-      phone: data.phone || null,
-      first_name: data.firstName || null,
-      last_name: data.lastName || null,
-      stage: 'form_submitted',
-      source: 'website'  // Direct GHL booking = website traffic
-    })
-    .select('id')
-    .single();
+    .rpc('create_contact_with_ghl_id', {
+      ghl_id: data.ghlId,
+      contact_email: data.email || null,
+      contact_phone: data.phone || null,
+      contact_first_name: data.firstName || null,
+      contact_last_name: data.lastName || null,
+      contact_stage: 'form_submitted',
+      contact_source: 'website'
+    });
 
   if (error) {
     throw new Error(`Failed to create contact: ${error.message}`);
   }
 
-  return newContact.id;
+  return newContact;
 }
 
 /**
