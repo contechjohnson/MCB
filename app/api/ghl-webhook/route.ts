@@ -69,10 +69,12 @@ export async function POST(request: NextRequest) {
     // Build update data based on event
     const updateData = buildGHLUpdateData(eventType, body);
 
+    // Use dynamic update function to bypass schema cache
     const { error: updateError } = await supabaseAdmin
-      .from('contacts')
-      .update(updateData)
-      .eq('id', contactId);
+      .rpc('update_contact_dynamic', {
+        contact_id: contactId,
+        update_data: updateData
+      });
 
     if (updateError) {
       console.error('Error updating contact:', updateError);
@@ -149,11 +151,12 @@ async function findOrCreateContactGHL(data: {
 
   if (existingId) {
     // Found existing contact - ensure GHL_ID is set (might be ManyChat contact)
+    // Use dynamic update to bypass schema cache
     await supabaseAdmin
-      .from('contacts')
-      .update({ GHL_ID: data.ghlId })
-      .eq('id', existingId)
-      .is('GHL_ID', null); // Only update if not already set
+      .rpc('update_contact_dynamic', {
+        contact_id: existingId,
+        update_data: { GHL_ID: data.ghlId }
+      });
 
     return existingId;
   }
