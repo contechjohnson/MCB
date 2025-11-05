@@ -20,8 +20,9 @@ const MANYCHAT_API_URL = 'https://api.manychat.com/fb/subscriber';
  * - link_sent: Booking link sent
  * - link_clicked: They clicked the booking link
  *
- * Strategy: When webhook fires, we PULL full data from ManyChat API
- * This ensures we always get the latest conversation state
+ * Strategy: Accept full subscriber payload from ManyChat
+ * Same payload structure, different event_type determines which timestamp to create
+ * Updates Q1, Q2, objections on ALL events (answers might change)
  */
 export async function POST(request: NextRequest) {
   try {
