@@ -33,7 +33,7 @@ export default function HomePage() {
       </div>
 
       <p style={{ color: '#999', fontSize: '14px' }}>
-        System running on Vercel. Data stored in Supabase.
+        System running on Vercel. Data stored in Supabase. Last deployed: Nov 5, 2025.
       </p>
     </div>
   );
