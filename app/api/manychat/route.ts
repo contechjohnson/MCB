@@ -25,17 +25,54 @@ const MANYCHAT_API_URL = 'https://api.manychat.com/fb/subscriber';
  */
 export async function POST(request: NextRequest) {
   try {
-    const body = await request.json();
+    let body = await request.json();
+
+    // Handle array payload (ManyChat sometimes sends array)
+    if (Array.isArray(body) && body.length > 0) {
+      body = body[0];
+    }
 
     console.log('ManyChat webhook received:', {
-      event: body.event_type,
-      subscriber_id: body.subscriber_id,
+      hasSubscriber: !!body.subscriber,
+      hasSubscriberId: !!body.subscriber_id,
+      eventType: body.event_type,
       timestamp: new Date().toISOString()
     });
 
-    // Extract data from webhook
-    const subscriberId = body.subscriber_id;
-    const eventType = body.event_type; // 'contact_created', 'dm_qualified', 'link_sent', 'link_clicked'
+    // Extract data - handle both formats
+    let subscriberId: string | null = null;
+    let eventType: string | null = null;
+    let manychatData: any = null;
+
+    // Format 1: Full payload with subscriber object (what you're actually sending)
+    if (body.subscriber) {
+      subscriberId = body.subscriber.id;
+      manychatData = body.subscriber; // We already have full data!
+
+      // Determine event type from custom fields if not explicitly provided
+      if (body.event_type) {
+        eventType = body.event_type;
+      } else {
+        // Infer event type from custom fields
+        const cf = body.subscriber.custom_fields || {};
+        if (cf.MCB_CLICKED_LINK) {
+          eventType = 'link_clicked';
+        } else if (cf.MCB_SENT_LINK) {
+          eventType = 'link_sent';
+        } else if (cf.MCB_LEAD_CONTACT) {
+          eventType = 'dm_qualified';
+        } else if (cf.MCB_LEAD) {
+          eventType = 'contact_created';
+        } else {
+          eventType = 'contact_update';
+        }
+      }
+    }
+    // Format 2: Simple payload with just subscriber_id and event_type
+    else if (body.subscriber_id) {
+      subscriberId = body.subscriber_id;
+      eventType = body.event_type;
+    }
 
     if (!subscriberId) {
       console.error('No subscriber_id in webhook');
@@ -51,20 +88,22 @@ export async function POST(request: NextRequest) {
       status: 'received'
     });
 
-    // Fetch full subscriber data from ManyChat API
-    const manychatData = await fetchManyChatData(subscriberId);
-
+    // Fetch full subscriber data from ManyChat API (only if we don't have it)
     if (!manychatData) {
-      console.error('Failed to fetch ManyChat data');
-      await supabaseAdmin.from('webhook_logs').insert({
-        source: 'manychat',
-        event_type: eventType,
-        MC_ID: subscriberId,
-        payload: body,
-        status: 'error',
-        error_message: 'Failed to fetch data from ManyChat API'
-      });
-      return NextResponse.json({ error: 'Failed to fetch ManyChat data' }, { status: 200 });
+      manychatData = await fetchManyChatData(subscriberId);
+
+      if (!manychatData) {
+        console.error('Failed to fetch ManyChat data');
+        await supabaseAdmin.from('webhook_logs').insert({
+          source: 'manychat',
+          event_type: eventType,
+          MC_ID: subscriberId,
+          payload: body,
+          status: 'error',
+          error_message: 'Failed to fetch data from ManyChat API'
+        });
+        return NextResponse.json({ error: 'Failed to fetch ManyChat data' }, { status: 200 });
+      }
     }
 
     // Find or create contact
@@ -201,10 +240,12 @@ function buildUpdateData(eventType: string, manychatData: any) {
   const baseData: any = {
     first_name: manychatData.first_name || null,
     last_name: manychatData.last_name || null,
-    email_primary: manychatData.email || null,
-    phone: manychatData.phone || null,
-    IG: manychatData.instagram_username || null,
+    email_primary: manychatData.email || customFields['custom field email'] || customFields.MCB_SEARCH_EMAIL || null,
+    phone: manychatData.phone || manychatData.whatsapp_phone || null,
+    IG: manychatData.ig_username || manychatData.instagram_username || null,
     FB: manychatData.name || null,
+    AD_ID: customFields.AD_ID || customFields.ADID || null,
+    chatbot_AB: customFields['Chatbot AB Test'] || null,
     updated_at: new Date().toISOString()
   };
 
@@ -221,11 +262,11 @@ function buildUpdateData(eventType: string, manychatData: any) {
       // They answered BOTH questions (final state)
       return {
         ...baseData,
-        Q1_question: customFields.Q1 || customFields.months_postpartum || null,
-        Q2_question: customFields.Q2 || customFields.symptoms || null,
-        objections: customFields.objections || null,
-        lead_summary: customFields.lead_summary || null,
-        thread_ID: customFields.thread_id || null,
+        Q1_question: customFields['Months Postpartum'] || customFields['How Far Postpartum'] || null,
+        Q2_question: customFields.Symptoms || null,
+        objections: customFields.Objections || null,
+        lead_summary: customFields['Cody > Response'] || null,
+        thread_ID: customFields['Conversation ID'] || null,
         DM_qualified_date: new Date().toISOString(),
         stage: 'DM_qualified'
       };
