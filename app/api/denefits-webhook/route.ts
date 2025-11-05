@@ -63,28 +63,68 @@ export async function POST(request: NextRequest) {
     const { data: contactId } = await supabaseAdmin
       .rpc('find_contact_by_email', { search_email: email.toLowerCase().trim() });
 
+    // Extract contract details from Denefits payload
+    const contract = body.data?.contract || body;
+    const contractId = contract.contract_id;
+    const contractCode = contract.contract_code;
+    const financedAmount = parseFloat(contract.financed_amount || amount);
+    const downpayment = parseFloat(contract.downpayment_amount || 0);
+    const recurringAmount = parseFloat(contract.recurring_amount || 0);
+    const numPayments = parseInt(contract.number_of_payments || 0);
+    const remainingPayments = parseInt(contract.remaining_payments || numPayments);
+
+    // Log payment to payments table (works for both matched and orphan)
+    await supabaseAdmin.from('payments').insert({
+      contact_id: contactId || null,  // NULL = orphan
+      payment_event_id: contractCode || `denefits_${contractId}`,
+      payment_source: 'denefits',
+      payment_type: 'buy_now_pay_later',
+      customer_email: email,
+      customer_name: `${contract.customer_first_name || ''} ${contract.customer_last_name || ''}`.trim() || null,
+      customer_phone: contract.customer_mobile || null,
+      amount: financedAmount,
+      currency: 'usd',
+      status: 'active',  // Denefits contracts are "active" vs "paid"
+      payment_date: contract.date_added ? new Date(contract.date_added).toISOString() : new Date().toISOString(),
+      denefits_contract_id: contractId,
+      denefits_contract_code: contractCode,
+      denefits_financed_amount: financedAmount,
+      denefits_downpayment: downpayment,
+      denefits_recurring_amount: recurringAmount,
+      denefits_num_payments: numPayments,
+      denefits_remaining_payments: remainingPayments,
+      raw_payload: body
+    });
+
     if (!contactId) {
-      console.warn('No contact found for Denefits payment:', email);
-      // Still log the event for manual review
+      console.warn('No contact found for email:', email, '- Payment logged as orphan');
       await supabaseAdmin.from('webhook_logs').insert({
         source: 'denefits',
         event_type: eventType,
         payload: body,
-        status: 'error',
-        error_message: 'Contact not found by email'
+        status: 'processed_orphan'
       });
-      return NextResponse.json({
-        warning: 'Contact not found',
-        email: email
-      }, { status: 200 });
+      return NextResponse.json({ success: true, orphan: true }, { status: 200 });
     }
 
-    // Update contact based on event type
-    const updateData = buildDenefitsUpdateData(eventType, body, amount);
+    // Update contact with purchase info (recalculate total from all payments)
+    const { data: totalPurchases } = await supabaseAdmin
+      .from('payments')
+      .select('amount')
+      .eq('contact_id', contactId)
+      .in('status', ['paid', 'active']);
+
+    const totalAmount = totalPurchases?.reduce((sum, p) => sum + Number(p.amount), 0) || financedAmount;
 
     const { error: updateError } = await supabaseAdmin
       .from('contacts')
-      .update(updateData)
+      .update({
+        email_payment: email,
+        purchase_date: new Date().toISOString(),
+        purchase_amount: totalAmount,  // Total from ALL payments
+        stage: 'purchased',
+        updated_at: new Date().toISOString()
+      })
       .eq('id', contactId);
 
     if (updateError) {

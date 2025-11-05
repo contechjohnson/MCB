@@ -138,28 +138,46 @@ async function handleCheckoutCompleted(event: Stripe.Event) {
   const { data: contactId } = await supabaseAdmin
     .rpc('find_contact_by_email', { search_email: email });
 
+  // Log payment (works for both matched and orphan payments)
+  await supabaseAdmin.from('payments').insert({
+    contact_id: contactId || null,  // NULL = orphan
+    payment_event_id: event.id,
+    payment_source: 'stripe',
+    payment_type: 'buy_in_full',
+    customer_email: email,
+    customer_name: session.customer_details?.name || null,
+    customer_phone: session.customer_details?.phone || null,
+    amount: amount,
+    currency: session.currency || 'usd',
+    status: 'paid',
+    payment_date: new Date(event.created * 1000).toISOString(),
+    stripe_event_type: event.type,
+    stripe_customer_id: customerId || null,
+    stripe_session_id: session.id,
+    raw_payload: event
+  });
+
   if (!contactId) {
-    console.warn('No contact found for email:', email);
-    // Still log the event for manual review
-    await supabaseAdmin.from('stripe_events').insert({
-      event_id: event.id,
-      event_type: event.type,
-      customer_email: email,
-      amount: amount,
-      status: 'paid',
-      raw_event: event
-    });
+    console.warn('No contact found for email:', email, '- Payment logged as orphan');
     return;
   }
 
-  // Update contact with purchase info
+  // Update contact with purchase info (recalculate total from all payments)
+  const { data: totalPurchases } = await supabaseAdmin
+    .from('payments')
+    .select('amount')
+    .eq('contact_id', contactId)
+    .in('status', ['paid', 'active']);
+
+  const totalAmount = totalPurchases?.reduce((sum, p) => sum + Number(p.amount), 0) || amount;
+
   const { error: updateError } = await supabaseAdmin
     .from('contacts')
     .update({
       email_payment: email,
       stripe_customer_id: customerId,
       purchase_date: new Date().toISOString(),
-      purchase_amount: amount,
+      purchase_amount: totalAmount,  // Total from ALL payments
       stage: 'purchased',
       updated_at: new Date().toISOString()
     })
