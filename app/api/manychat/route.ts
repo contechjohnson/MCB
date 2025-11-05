@@ -114,13 +114,14 @@ export async function POST(request: NextRequest) {
     // Find or create contact
     const contactId = await findOrCreateContact(subscriberId);
 
-    // Update contact based on event type
+    // Update contact based on event type (using function to bypass schema cache)
     const updateData = buildUpdateData(eventType, manychatData);
 
     const { error: updateError } = await supabaseAdmin
-      .from('contacts')
-      .update(updateData)
-      .eq('id', contactId);
+      .rpc('update_contact_dynamic', {
+        contact_id: contactId,
+        update_data: updateData
+      });
 
     if (updateError) {
       console.error('Error updating contact:', updateError);
