@@ -26,10 +26,37 @@ export default function HomePage() {
           Active Webhooks
         </h2>
         <ul style={{ listStyle: 'disc', marginLeft: '20px', lineHeight: '1.8' }}>
-          <li><code>/api/stripe-webhook</code> - Payment events</li>
-          <li><code>/api/ghl-webhook</code> - Booking & attendance events</li>
-          <li><code>/api/manychat</code> - Bot conversation events</li>
+          <li><code>/api/stripe-webhook</code> - Payment events (matches by email)</li>
+          <li><code>/api/denefits-webhook</code> - BNPL financing events (matches by email)</li>
+          <li><code>/api/ghl-webhook</code> - Booking & attendance events (smart matching)</li>
+          <li><code>/api/manychat</code> - Bot conversation events (matches by MC_ID)</li>
         </ul>
+      </div>
+
+      <div style={{
+        background: '#e8f5e9',
+        padding: '20px',
+        borderRadius: '6px',
+        marginBottom: '24px',
+        border: '1px solid #81c784'
+      }}>
+        <h2 style={{ fontSize: '18px', marginBottom: '12px', fontWeight: '500', color: '#2e7d32' }}>
+          Duplicate Prevention Strategy
+        </h2>
+        <div style={{ fontSize: '14px', lineHeight: '1.6', color: '#1b5e20' }}>
+          <p style={{ marginBottom: '12px' }}>
+            <strong>ManyChat:</strong> Uses MC_ID (unique) - prevents duplicates within ManyChat
+          </p>
+          <p style={{ marginBottom: '12px' }}>
+            <strong>GHL:</strong> Smart matching - tries GHL_ID → Email → Phone (links to existing ManyChat contacts)
+          </p>
+          <p style={{ marginBottom: '12px' }}>
+            <strong>Stripe/Denefits:</strong> Email matching across all 3 email fields (creates orphan payments if no match)
+          </p>
+          <p style={{ marginTop: '16px', fontStyle: 'italic' }}>
+            Each contact can have one MC_ID and one GHL_ID, preventing duplicates across platforms.
+          </p>
+        </div>
       </div>
 
       <p style={{ color: '#999', fontSize: '14px' }}>

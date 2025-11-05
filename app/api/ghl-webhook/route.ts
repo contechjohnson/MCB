@@ -166,7 +166,8 @@ async function findOrCreateContactGHL(data: {
       phone: data.phone || null,
       first_name: data.firstName || null,
       last_name: data.lastName || null,
-      stage: 'form_submitted'
+      stage: 'form_submitted',
+      source: 'website'  // Direct GHL booking = website traffic
     })
     .select('id')
     .single();
@@ -214,6 +215,8 @@ function buildGHLUpdateData(eventType: string, body: any) {
     MC_ID: customData.MC_ID || customFields.MC_ID || null,
     AD_ID: customFields.AD_ID || null,
     thread_ID: customFields.THREAD_ID || null,
+    // Source logic: MC_ID OR AD_ID = Instagram, otherwise website
+    source: (customData.MC_ID || customFields.MC_ID || customFields.AD_ID) ? 'instagram' : 'website',
     updated_at: new Date().toISOString()
   };
 

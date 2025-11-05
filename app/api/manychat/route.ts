@@ -254,6 +254,7 @@ function buildUpdateData(eventType: string | null, manychatData: any) {
     trigger_word: customFields.trigger_word || customFields['All Tags'] || null,
     subscribed: manychatData.subscribed || null,
     ig_last_interaction: manychatData.ig_last_interaction || null,
+    source: 'instagram',  // ManyChat = Instagram traffic
     updated_at: new Date().toISOString()
   };
 
