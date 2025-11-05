@@ -1,0 +1,381 @@
+
+
+
+================================================================================
+💰 REVENUE ANALYSIS
+================================================================================
+
+Total contacts: 6,386
+Total customers: 70
+
+📊 TOTAL REVENUE
+
+  Total:    $170,090.97
+  Stripe:   $170,090.97 (100.0%)
+  Denefits: $0.00 (0.0%)
+
+  Average Order Value: $2,429.87
+
+🏆 TOP 20 CUSTOMERS BY REVENUE
+
+ 1. $  3,997.00 - Christine Anderson
+    rawkstar_cj@yahoo.com
+    Stripe: $3997.00
+
+ 2. $  3,196.00 - Unknown
+    nychelle8@hotmail.com
+    Stripe: $3196.00
+
+ 3. $  3,196.00 - • 𝐃𝐚𝐧𝐢𝐞𝐥𝐥𝐞 𝐁𝐫𝐨𝐰𝐧 •
+    daniellebrown8914@gmail.com
+    Stripe: $3196.00
+
+ 4. $  3,196.00 - Grace McCormick
+    gpotes0727@gmail.com
+    Stripe: $3196.00
+
+ 5. $  3,196.00 - Unknown
+    nessers1120@gmail.com
+    Stripe: $3196.00
+
+ 6. $  3,196.00 - Madison Young
+    maddi.courier@gmail.com
+    Stripe: $3196.00
+
+ 7. $  3,196.00 - Kerri
+    keamahoney@gmail.com
+    Stripe: $3196.00
+
+ 8. $  3,196.00 - Jourdan Baker
+    jkbake58@gmail.com
+    Stripe: $3196.00
+
+ 9. $  3,196.00 - Amanda Boydstun
+    aboydstun40@gmail.com
+    Stripe: $3196.00
+
+10. $  3,196.00 - Esther Rofe
+    ejrofe@gmail.com
+    Stripe: $3196.00
+
+11. $  3,196.00 - Amanda ❤️ Phillips
+    lewis.amanda.c@gmail.com
+    Stripe: $3196.00
+
+12. $  3,196.00 - Haley Bents
+    bents.haley07@gmail.com
+    Stripe: $3196.00
+
+13. $  3,196.00 - Katy Rimer
+    kejames10@gmail.com
+    Stripe: $3196.00
+
+14. $  3,196.00 - Unknown
+    mrslink20@gmail.com
+    Stripe: $3196.00
+
+15. $  3,196.00 - Elisha Bent
+    elishabent@yahoo.com
+    Stripe: $3196.00
+
+16. $  3,196.00 - Mariah Carpenter
+    mariahbcarpenter@gmail.com
+    Stripe: $3196.00
+
+17. $  3,196.00 - Bethany Salgado
+    beth.guzman@icloud.com
+    Stripe: $3196.00
+
+18. $  3,196.00 - Lauren H
+    lprue584@gmail.com
+    Stripe: $3196.00
+
+19. $  3,196.00 - Angelica Huckaba
+    angelica_copeland@yahoo.com
+    Stripe: $3196.00
+
+20. $  3,196.00 - Kariss Lynch | Author
+    ladyraider09@yahoo.com
+    Stripe: $3196.00
+
+================================================================================
+📦 REVENUE BY DATA SOURCE
+
+supabase_export:
+  Customers: 70
+  Revenue:   $170,090.97
+  Avg/Customer: $2,429.87
+
+================================================================================
+📈 REVENUE DISTRIBUTION
+
+$0-$500            1 (1.4%) █
+$500-$1,000        0 (0.0%) 
+$1,000-$2,000     22 (31.4%) ████████████████
+$2,000-$3,000     26 (37.1%) ███████████████████
+$3,000-$5,000     21 (30.0%) ███████████████
+$5,000+            0 (0.0%) 
+
+================================================================================
+💳 PAYMENT METHOD BREAKDOWN
+
+Stripe Only                      70 (100.0%)
+Denefits Only                     0 (0.0%)
+Both (Stripe + Denefits)          0 (0.0%)
+
+================================================================================
+🔄 REPEAT CUSTOMERS
+
+Customers with multiple Stripe payments: 1
+Customers with multiple Denefits contracts: 0
+
+Top repeat Stripe customers:
+
+  eric@ppcareusa.com - 3 payments, $44.97
+
+================================================================================
+✅ REVENUE ANALYSIS COMPLETE
+================================================================================
+
+
+
+
+================================================================================
+📊 FUNNEL PROGRESSION ANALYSIS
+================================================================================
+
+Total contacts: 6,386
+
+🔍 FUNNEL STAGE DISTRIBUTION
+
+Unknown                              3080 ( 48.2%) ████████████████████████
+LEAD_CONTACT                         1309 ( 20.5%) ██████████
+CLARA_EMAIL                           484 (  7.6%) ████
+CLICKED_LINK                          390 (  6.1%) ███
+SENT_LINK                             345 (  5.4%) ███
+CLARA_CONVO                           243 (  3.8%) ██
+CLARA_SEND_LINK                       131 (  2.1%) █
+COMPLETED_DC                           79 (  1.2%) █
+NEW_CONTACT_WEBSITE                    70 (  1.1%) █
+ATTENDED                               66 (  1.0%) █
+LEAD                                   46 (  0.7%) 
+BOUGHT_PACKAGE                         38 (  0.6%) 
+CLARA_CLICK_LINK                       35 (  0.5%) 
+READY_TO_BOOK                          21 (  0.3%) 
+PACKAGE_REGISTRATION_COMPLETE          14 (  0.2%) 
+UNKNOWN_OUTBOUND                        8 (  0.1%) 
+MAIN_LANDING_PAGE_FORM_COMPLETE         5 (  0.1%) 
+PAID                                    4 (  0.1%) 
+BOOKED_DC                               3 (  0.0%) 
+ORGANIC                                 3 (  0.0%) 
+NEW_CONTACT_ADS                         3 (  0.0%) 
+NEW_CONTACT_COMMENT                     3 (  0.0%) 
+2025-07-21 19:07:06                     1 (  0.0%) 
+NEW_CONTACT                             1 (  0.0%) 
+2025-09-15 00:10:50                     1 (  0.0%) 
+{{cuf_12800559}} CARE CARE              1 (  0.0%) 
+2025-07-28 19:17:36                     1 (  0.0%) 
+BOOKED                                  1 (  0.0%) 
+
+================================================================================
+💰 CONVERSION RATE BY STAGE
+
+BOUGHT_PACKAGE                        30/   38 ( 78.9%)
+CLICKED_LINK                          21/  390 (  5.4%)
+LEAD                                   1/   46 (  2.2%)
+LEAD_CONTACT                          18/ 1309 (  1.4%)
+Unknown                                0/    0 (  0.0%)
+CLARA_EMAIL                            0/  484 (  0.0%)
+SENT_LINK                              0/  345 (  0.0%)
+CLARA_CONVO                            0/  243 (  0.0%)
+CLARA_SEND_LINK                        0/  131 (  0.0%)
+COMPLETED_DC                           0/   79 (  0.0%)
+NEW_CONTACT_WEBSITE                    0/   70 (  0.0%)
+ATTENDED                               0/   66 (  0.0%)
+CLARA_CLICK_LINK                       0/   35 (  0.0%)
+READY_TO_BOOK                          0/   21 (  0.0%)
+PACKAGE_REGISTRATION_COMPLETE          0/   14 (  0.0%)
+UNKNOWN_OUTBOUND                       0/    8 (  0.0%)
+MAIN_LANDING_PAGE_FORM_COMPLETE        0/    5 (  0.0%)
+PAID                                   0/    4 (  0.0%)
+BOOKED_DC                              0/    3 (  0.0%)
+ORGANIC                                0/    3 (  0.0%)
+NEW_CONTACT_ADS                        0/    3 (  0.0%)
+NEW_CONTACT_COMMENT                    0/    3 (  0.0%)
+2025-07-21 19:07:06                    0/    1 (  0.0%)
+NEW_CONTACT                            0/    1 (  0.0%)
+2025-09-15 00:10:50                    0/    1 (  0.0%)
+{{cuf_12800559}} CARE CARE             0/    1 (  0.0%)
+2025-07-28 19:17:36                    0/    1 (  0.0%)
+BOOKED                                 0/    1 (  0.0%)
+
+================================================================================
+🎯 PAID VS ORGANIC PERFORMANCE
+
+Contact Distribution:
+  Paid:     2,132 (33.4%)
+  Organic:  982 (15.4%)
+  Unknown:  3,272 (51.2%)
+
+Conversion Rates:
+  Paid:     0/2132 = 0.00%
+  Organic:  0/982 = 0.00%
+
+Revenue:
+  Paid:     $0.00
+  Organic:  $0.00
+
+
+================================================================================
+🎪 TOP TRIGGER WORDS
+
+By Revenue:
+
+ 1. Unknown                   $ 170,091 (70/6146 = 1.1%)
+ 2. 1174019448.0              $       0 (0/1 = 0.0%)
+ 3. {{cuf_12800559}} HEAL     $       0 (0/1 = 0.0%)
+ 4. {{cuf_12800559}} RELIEF   $       0 (0/3 = 0.0%)
+ 5. {{cuf_12800559}} HEAL HEAL $       0 (0/128 = 0.0%)
+ 6. 110162715.0               $       0 (0/1 = 0.0%)
+ 7. {{cuf_12800559}} 55 RELIEF 55 RELIEF $       0 (0/2 = 0.0%)
+ 8. {{cuf_12800559}} RELIEF RELIEF $       0 (0/44 = 0.0%)
+ 9. {{cuf_12800559}} BLOG BLOG $       0 (0/4 = 0.0%)
+10. {{cuf_12800559}} CARE CARE $       0 (0/13 = 0.0%)
+11. {{cuf_12800559}} 55 55    $       0 (0/18 = 0.0%)
+12. {{cuf_12800559}} HEAL HEAL HEAL HEAL $       0 (0/4 = 0.0%)
+13. {{cuf_12800559}} BETTER BETTER BETTER BETTER $       0 (0/1 = 0.0%)
+14. {{cuf_12800559}} BETTER BETTER $       0 (0/5 = 0.0%)
+15. {{cuf_12800559}} RELIEF HEAL RELIEF HEAL $       0 (0/3 = 0.0%)
+
+By Conversion Rate:
+
+ 1. Unknown                     1.1% (70/6146 contacts)
+ 2. {{cuf_12800559}} HEAL HEAL   0.0% (0/128 contacts)
+ 3. {{cuf_12800559}} RELIEF RELIEF   0.0% (0/44 contacts)
+ 4. {{cuf_12800559}} CARE CARE   0.0% (0/13 contacts)
+ 5. {{cuf_12800559}} 55 55      0.0% (0/18 contacts)
+
+================================================================================
+📉 FUNNEL DROP-OFF POINTS
+
+Stage-by-stage progression:
+
+ 1. LEAD_CONTACT               1309 contacts
+
+ 3. SENT_LINK                   345 contacts
+    ↓ Drop-off: 964 (73.6%)
+
+ 4. CLICKED_LINK                390 contacts
+    ↓ Drop-off: -45 (-13.0%)
+
+ 6. READY_TO_BOOK                21 contacts
+    ↓ Drop-off: 369 (94.6%)
+
+ 7. BOOKED                        1 contacts
+    ↓ Drop-off: 20 (95.2%)
+
+ 8. ATTENDED                     66 contacts
+    ↓ Drop-off: -65 (-6500.0%)
+
+ 9. BOUGHT_PACKAGE               38 contacts
+    ↓ Drop-off: 28 (42.4%)
+
+10. PAID                          4 contacts
+    ↓ Drop-off: 34 (89.5%)
+
+================================================================================
+✅ FUNNEL ANALYSIS COMPLETE
+================================================================================
+
+
+
+
+================================================================================
+📅 TIME-BASED COHORT ANALYSIS
+================================================================================
+
+📈 MONTHLY SUBSCRIPTION TRENDS
+
+Month       | Contacts | Customers | Conversion | Revenue
+----------------------------------------------------------------------
+2024-05   |        2 |         0 |        0.0% | $       0
+2024-06   |        3 |         0 |        0.0% | $       0
+2024-07   |        3 |         0 |        0.0% | $       0
+2024-08   |        9 |         0 |        0.0% | $       0
+2024-09   |       34 |         0 |        0.0% | $       0
+2024-10   |       59 |         0 |        0.0% | $       0
+2024-11   |       86 |         2 |        2.3% | $   5,446
+2024-12   |      100 |         2 |        2.0% | $   7,193
+2025-01   |       86 |         0 |        0.0% | $       0
+2025-02   |       53 |         0 |        0.0% | $       0
+2025-03   |       57 |         1 |        1.8% | $   1,696
+2025-04   |       69 |         2 |        2.9% | $   3,693
+2025-05   |      318 |        25 |        7.9% | $  60,678
+2025-06   |      452 |        21 |        4.6% | $  54,225
+2025-07   |      550 |         1 |        0.2% | $   1,696
+2025-08   |     1345 |         6 |        0.4% | $  12,987
+2025-09   |     1477 |         7 |        0.5% | $  17,932
+2025-10   |     1522 |         3 |        0.2% | $   4,545
+2025-11   |      128 |         0 |        0.0% | $       0
+
+================================================================================
+💰 MONTHLY PURCHASE TRENDS
+
+Month       | Purchases |   Total Revenue |  Stripe |  Denefits
+---------------------------------------------------------------------------
+2025-05   |         9 | $        22,672 | $ 22,672 | $        0
+2025-06   |        38 | $        92,275 | $ 92,275 | $        0
+2025-07   |         5 | $        12,034 | $ 12,034 | $        0
+2025-08   |         6 | $        12,987 | $ 12,987 | $        0
+2025-09   |         8 | $        21,629 | $ 21,629 | $        0
+2025-10   |         4 | $         8,494 | $  8,494 | $        0
+
+================================================================================
+📆 DAY OF WEEK PATTERNS
+
+Subscriptions by Day of Week:
+
+Sunday       926 contacts (0.8% conversion) ███████████████████
+Monday       989 contacts (0.9% conversion) ████████████████████
+Tuesday      992 contacts (1.1% conversion) ████████████████████
+Wednesday    919 contacts (1.1% conversion) ██████████████████
+Thursday     890 contacts (1.2% conversion) ██████████████████
+Friday       875 contacts (1.1% conversion) ██████████████████
+Saturday     762 contacts (1.6% conversion) ███████████████
+
+================================================================================
+⏱️  TIME TO PURCHASE
+
+Customers with timing data: 69
+
+Average:   28.5 days
+Median:    9 days
+Fastest:   0 days
+Slowest:   293 days
+
+Time to Purchase Distribution:
+
+Same day (0 days)       9 ( 13.0%) ███████
+1-7 days               22 ( 31.9%) ████████████████
+8-14 days              19 ( 27.5%) ██████████████
+15-30 days              7 ( 10.1%) █████
+31-60 days              4 (  5.8%) ███
+61-90 days              2 (  2.9%) █
+90+ days                6 (  8.7%) ████
+
+================================================================================
+🕐 RECENT ACTIVITY (Last 30 Days)
+
+New contacts in last 30 days:  1,559
+New customers in last 30 days: 2
+Revenue in last 30 days:       $4,500.00
+
+Recent customers:
+
+  10/12/2025 - connectmedina@gmail.com - $2250.00
+  10/11/2025 - kyleyfusiara@yahoo.com - $2250.00
+
+================================================================================
+✅ COHORT ANALYSIS COMPLETE
+================================================================================
+

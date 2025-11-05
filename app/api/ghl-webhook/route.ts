@@ -36,11 +36,12 @@ export async function POST(request: NextRequest) {
       timestamp: new Date().toISOString()
     });
 
-    // Extract data from webhook
-    const ghlContactId = body.contact_id;
-    const eventType = body.type || determineEventTypeFromStage(body);
-    const email = body.email?.toLowerCase().trim();
-    const phone = normalizePhone(body.phone);
+    // Extract data from webhook (check customData first, fallback to root)
+    const customData = body.customData || {};
+    const ghlContactId = customData.contact_id || body.contact_id;
+    const eventType = customData.event_type || body.type || determineEventTypeFromStage(body);
+    const email = (customData.email || body.email)?.toLowerCase().trim();
+    const phone = normalizePhone(customData.phone || body.phone);
 
     if (!ghlContactId) {
       console.error('No contact_id in GHL webhook');
@@ -61,8 +62,8 @@ export async function POST(request: NextRequest) {
       ghlId: ghlContactId,
       email: email,
       phone: phone,
-      firstName: body.first_name,
-      lastName: body.last_name
+      firstName: customData.first_name || body.first_name,
+      lastName: customData.last_name || body.last_name
     });
 
     // Build update data based on event
@@ -204,19 +205,19 @@ function determineEventTypeFromStage(body: any): string {
 function buildGHLUpdateData(eventType: string, body: any) {
   // Extract custom data (where MC_ID, AD_ID, etc. live)
   const customData = body.customData || {};
-  const customFields = body; // Custom fields are at root level in your payload
+  const customFields = body; // Fallback to root level
 
   const baseData: any = {
-    email_booking: body.email?.toLowerCase().trim() || null,
-    phone: normalizePhone(body.phone) || null,
-    first_name: body.first_name || null,
-    last_name: body.last_name || null,
-    // Capture MC_ID from custom data or root
+    email_booking: (customData.email || body.email)?.toLowerCase().trim() || null,
+    phone: normalizePhone(customData.phone || body.phone) || null,
+    first_name: customData.first_name || body.first_name || null,
+    last_name: customData.last_name || body.last_name || null,
+    // Capture MC_ID, AD_ID, THREAD_ID from customData first, then root
     MC_ID: customData.MC_ID || customFields.MC_ID || null,
-    AD_ID: customFields.AD_ID || null,
-    thread_ID: customFields.THREAD_ID || null,
+    AD_ID: customData.AD_ID || customFields.AD_ID || null,
+    thread_ID: customData.THREAD_ID || customFields.THREAD_ID || null,
     // Source logic: MC_ID OR AD_ID = Instagram, otherwise website
-    source: (customData.MC_ID || customFields.MC_ID || customFields.AD_ID) ? 'instagram' : 'website',
+    source: (customData.MC_ID || customFields.MC_ID || customData.AD_ID || customFields.AD_ID) ? 'instagram' : 'website',
     updated_at: new Date().toISOString()
   };
 
