@@ -245,7 +245,9 @@ function buildUpdateData(eventType: string | null, manychatData: any) {
     IG: manychatData.ig_username || manychatData.instagram_username || null,
     FB: manychatData.name || null,
     AD_ID: customFields.AD_ID || customFields.ADID || null,
-    chatbot_AB: customFields['Chatbot AB Test'] || null,
+    chatbot_AB: customFields.chatbot_AB || customFields['Chatbot AB Test'] || null,
+    thread_ID: customFields.thread_id || customFields['Conversation ID'] || null,
+    trigger_word: customFields.trigger_word || null,
     updated_at: new Date().toISOString()
   };
 
@@ -280,7 +282,7 @@ function buildUpdateData(eventType: string | null, manychatData: any) {
       return {
         ...baseData,
         ...dateFields,
-        subscribe_date: customFields.DATE_LINK_SENT || new Date().toISOString(),
+        subscribe_date: customFields.subscribed_date || manychatData.subscribed || new Date().toISOString(),
         stage: 'new_lead'
       };
 
