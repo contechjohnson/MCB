@@ -52,18 +52,6 @@ export async function POST(request: NextRequest) {
     // Extract email from nested structure
     const email = contract.customer_email || payload.customer_email || payload.email || payload.customer?.email;
 
-    if (!email) {
-      console.error('No email in Denefits webhook');
-      await supabaseAdmin.from('webhook_logs').insert({
-        source: 'denefits',
-        event_type: eventType,
-        payload: body,
-        status: 'error',
-        error_message: 'No email found in payload'
-      });
-      return NextResponse.json({ error: 'Missing email' }, { status: 200 });
-    }
-
     // Find contact by email (checks all 3 email fields)
     const { data: contactId } = await supabaseAdmin
       .rpc('find_contact_by_email', { search_email: email.toLowerCase().trim() });

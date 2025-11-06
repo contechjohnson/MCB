@@ -167,12 +167,30 @@ async function handleCheckoutCreated(event: Stripe.Event) {
 async function handleCheckoutCompleted(event: Stripe.Event) {
   const session = event.data.object as Stripe.Checkout.Session;
 
-  const email = session.customer_email?.toLowerCase().trim();
+  // Check both customer_email and customer_details.email
+  const email = (session.customer_email || session.customer_details?.email)?.toLowerCase().trim();
   const amount = session.amount_total ? session.amount_total / 100 : 0; // Convert cents to dollars
   const customerId = session.customer as string;
 
   if (!email) {
-    console.error('No email in checkout session');
+    console.error('No email in checkout session - logging payment without email');
+    // Still log the payment even without email
+    await supabaseAdmin.from('payments').insert({
+      contact_id: null,
+      payment_event_id: event.id,
+      payment_source: 'stripe',
+      payment_type: 'buy_in_full',
+      customer_name: session.customer_details?.name || null,
+      customer_phone: session.customer_details?.phone || null,
+      amount: amount,
+      currency: session.currency || 'usd',
+      status: 'paid',
+      payment_date: new Date(event.created * 1000).toISOString(),
+      stripe_event_type: event.type,
+      stripe_customer_id: customerId || null,
+      stripe_session_id: session.id,
+      raw_payload: event
+    });
     return;
   }
 
