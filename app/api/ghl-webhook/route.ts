@@ -225,16 +225,57 @@ function buildGHLUpdateData(eventType: string, body: any) {
 
   // Opportunity/booking events
   if (eventType === 'OpportunityCreate' || eventType.includes('Opportunity')) {
-    const stage = (body.pipleline_stage || body.pipeline_stage || '').toLowerCase();
+    // Check customData.pipeline_stage first (user's hardcoded values), fallback to GHL's actual stage
+    const stage = (customData.pipeline_stage || body.pipleline_stage || body.pipeline_stage || '').toLowerCase();
     const appointmentTime = body['Discovery Call Time (EST)'] || body.appointment_start_time;
 
-    // Common booking data
-    const opportunityData = {
+    // Handle user's hardcoded pipeline_stage values
+    if (stage === 'form_filled') {
+      return {
+        ...baseData,
+        form_submit_date: new Date().toISOString(),
+        stage: 'form_submitted'
+      };
+    }
+
+    if (stage === 'meeting_booked') {
+      const updateData: any = {
+        ...baseData,
+        meeting_book_date: new Date().toISOString(),
+        stage: 'meeting_booked'
+      };
+      // Try to capture actual appointment time if provided
+      if (appointmentTime) {
+        try {
+          updateData.appointment_date = new Date(appointmentTime).toISOString();
+        } catch {
+          // Invalid date, skip
+        }
+      }
+      return updateData;
+    }
+
+    if (stage === 'meeting_attended') {
+      return {
+        ...baseData,
+        meeting_held_date: new Date().toISOString(),
+        stage: 'meeting_held'
+      };
+    }
+
+    if (stage === 'package_sent') {
+      return {
+        ...baseData,
+        stage: 'package_sent'
+      };
+    }
+
+    // Fallback: Try to infer from GHL's actual stage names (for backward compatibility)
+    const opportunityData: any = {
       ...baseData,
       form_submit_date: new Date().toISOString()
     };
 
-    // Stage-specific updates
     if (stage.includes('scheduled') || stage.includes('booked') || appointmentTime) {
       if (appointmentTime) {
         try {
