@@ -71,6 +71,8 @@ export async function POST(request: NextRequest) {
     // Build update data based on event
     const updateData = buildGHLUpdateData(eventType, body);
 
+    console.log('GHL Update Data:', JSON.stringify(updateData, null, 2));
+
     // Use dynamic update function to bypass schema cache
     const { error: updateError } = await supabaseAdmin
       .rpc('update_contact_dynamic', {
