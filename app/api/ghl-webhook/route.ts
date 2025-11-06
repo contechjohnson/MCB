@@ -244,7 +244,6 @@ function buildGHLUpdateData(eventType: string, body: any) {
     if (stage === 'meeting_booked') {
       const updateData: any = {
         ...baseData,
-        meeting_book_date: new Date().toISOString(),
         stage: 'meeting_booked'
       };
       // Try to capture actual appointment time if provided
@@ -252,8 +251,12 @@ function buildGHLUpdateData(eventType: string, body: any) {
         try {
           updateData.appointment_date = new Date(appointmentTime).toISOString();
         } catch {
-          // Invalid date, skip
+          // Invalid date, skip - use current time
+          updateData.appointment_date = new Date().toISOString();
         }
+      } else {
+        // No appointment time provided, use current time
+        updateData.appointment_date = new Date().toISOString();
       }
       return updateData;
     }
@@ -261,7 +264,7 @@ function buildGHLUpdateData(eventType: string, body: any) {
     if (stage === 'meeting_attended') {
       return {
         ...baseData,
-        meeting_held_date: new Date().toISOString(),
+        appointment_held_date: new Date().toISOString(),
         stage: 'meeting_held'
       };
     }
@@ -283,18 +286,18 @@ function buildGHLUpdateData(eventType: string, body: any) {
     if (stage.includes('scheduled') || stage.includes('booked') || appointmentTime) {
       if (appointmentTime) {
         try {
-          opportunityData.meeting_book_date = new Date(appointmentTime).toISOString();
+          opportunityData.appointment_date = new Date(appointmentTime).toISOString();
         } catch {
-          opportunityData.meeting_book_date = new Date().toISOString();
+          opportunityData.appointment_date = new Date().toISOString();
         }
       } else {
-        opportunityData.meeting_book_date = new Date().toISOString();
+        opportunityData.appointment_date = new Date().toISOString();
       }
       opportunityData.stage = 'meeting_booked';
     }
 
     if (stage.includes('completed') || stage.includes('attended') || stage.includes('show')) {
-      opportunityData.meeting_held_date = new Date().toISOString();
+      opportunityData.appointment_held_date = new Date().toISOString();
       opportunityData.stage = 'meeting_held';
     }
 
@@ -310,7 +313,7 @@ function buildGHLUpdateData(eventType: string, body: any) {
   if (eventType === 'MeetingCompleted') {
     return {
       ...baseData,
-      meeting_held_date: new Date().toISOString(),
+      appointment_held_date: new Date().toISOString(),
       stage: 'meeting_held'
     };
   }
