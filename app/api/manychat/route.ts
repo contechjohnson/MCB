@@ -88,7 +88,7 @@ export async function POST(request: NextRequest) {
     await supabaseAdmin.from('webhook_logs').insert({
       source: 'manychat',
       event_type: eventType,
-      MC_ID: subscriberId,
+      mc_id: subscriberId,
       payload: body,
       status: 'received'
     });
@@ -102,7 +102,7 @@ export async function POST(request: NextRequest) {
         await supabaseAdmin.from('webhook_logs').insert({
           source: 'manychat',
           event_type: eventType,
-          MC_ID: subscriberId,
+          mc_id: subscriberId,
           payload: body,
           status: 'error',
           error_message: 'Failed to fetch data from ManyChat API'
@@ -128,7 +128,7 @@ export async function POST(request: NextRequest) {
       await supabaseAdmin.from('webhook_logs').insert({
         source: 'manychat',
         event_type: eventType,
-        MC_ID: subscriberId,
+        mc_id: subscriberId,
         payload: body,
         status: 'error',
         error_message: updateError.message
@@ -142,7 +142,7 @@ export async function POST(request: NextRequest) {
     await supabaseAdmin.from('webhook_logs').insert({
       source: 'manychat',
       event_type: eventType,
-      MC_ID: subscriberId,
+      mc_id: subscriberId,
       contact_id: contactId,
       payload: body,
       status: 'processed'

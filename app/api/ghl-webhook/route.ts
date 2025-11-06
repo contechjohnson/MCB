@@ -52,7 +52,7 @@ export async function POST(request: NextRequest) {
     await supabaseAdmin.from('webhook_logs').insert({
       source: 'ghl',
       event_type: eventType,
-      GHL_ID: ghlContactId,
+      ghl_id: ghlContactId,
       payload: body,
       status: 'received'
     });
@@ -83,7 +83,7 @@ export async function POST(request: NextRequest) {
       await supabaseAdmin.from('webhook_logs').insert({
         source: 'ghl',
         event_type: eventType,
-        GHL_ID: ghlContactId,
+        ghl_id: ghlContactId,
         payload: body,
         status: 'error',
         error_message: updateError.message
@@ -97,7 +97,7 @@ export async function POST(request: NextRequest) {
     await supabaseAdmin.from('webhook_logs').insert({
       source: 'ghl',
       event_type: eventType,
-      GHL_ID: ghlContactId,
+      ghl_id: ghlContactId,
       contact_id: contactId,
       payload: body,
       status: 'processed'
