@@ -160,12 +160,12 @@ async function findOrCreateContactGHL(data: {
     });
 
   if (existingId) {
-    // Found existing contact - ensure GHL_ID is set (might be ManyChat contact)
+    // Found existing contact - ensure ghl_id is set (might be ManyChat contact)
     // Use dynamic update to bypass schema cache
     await supabaseAdmin
       .rpc('update_contact_dynamic', {
         contact_id: existingId,
-        update_data: { GHL_ID: data.ghlId }
+        update_data: { ghl_id: data.ghlId }
       });
 
     return existingId;
