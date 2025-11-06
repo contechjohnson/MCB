@@ -27,18 +27,20 @@ export async function POST(request: NextRequest) {
     }
 
     console.log('Perspective webhook received:', {
-      hasData: !!body.data,
+      hasFunnelId: !!body.funnelId,
+      hasProfile: !!body.profile,
       timestamp: new Date().toISOString()
     });
 
     // Extract data from Perspective payload
-    const attributes = body.data?.attributes || {};
-    const profile = attributes.profile || {};
+    // Perspective sends profile as objects with {value, title} structure
+    const profile = body.profile || {};
+    const values = body.values || {};
 
-    const email = profile.email?.toLowerCase().trim();
-    const firstName = profile.firstName;
-    const phone = profile.phone;
-    const convertedAt = profile.ps_converted_at || attributes.convertedAt;
+    const email = (profile.email?.value || values.email)?.toLowerCase().trim();
+    const firstName = profile.firstName?.value || values.firstName;
+    const phone = profile.phone?.value || values.phone;
+    const convertedAt = values.ps_converted_at || body.meta?.ps_converted_at;
 
     if (!email) {
       console.error('No email in Perspective webhook');
