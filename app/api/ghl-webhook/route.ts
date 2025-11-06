@@ -60,6 +60,7 @@ export async function POST(request: NextRequest) {
     // Find or create contact using smart matching
     const contactId = await findOrCreateContactGHL({
       ghlId: ghlContactId,
+      mcId: customData.MC_ID || null,  // Include MC_ID for matching
       email: email,
       phone: phone,
       firstName: customData.first_name || body.first_name,
@@ -137,16 +138,18 @@ export async function GET() {
  */
 async function findOrCreateContactGHL(data: {
   ghlId: string;
+  mcId?: string | null;
   email?: string;
   phone?: string;
   firstName?: string;
   lastName?: string;
   source?: string | null;
 }): Promise<string> {
-  // Try smart finder (checks GHL_ID, email, phone)
+  // Try smart finder (checks GHL_ID, MC_ID, email, phone)
   const { data: existingId } = await supabaseAdmin
     .rpc('find_contact_smart', {
       search_ghl_id: data.ghlId,
+      search_mc_id: data.mcId || null,
       search_email: data.email || null,
       search_phone: data.phone || null
     });
