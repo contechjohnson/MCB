@@ -101,7 +101,10 @@ export async function POST(request: NextRequest) {
       event_type: eventType,
       ghl_id: ghlContactId,
       contact_id: contactId,
-      payload: body,
+      payload: {
+        ...body,
+        _debug_update_data: updateData  // Add debug info
+      },
       status: 'processed'
     });
 
