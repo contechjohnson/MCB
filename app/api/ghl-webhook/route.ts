@@ -345,6 +345,7 @@ function buildGHLUpdateData(eventType: string, body: any) {
   if (eventType === 'PackageSent') {
     return {
       ...baseData,
+      package_sent_date: new Date().toISOString(),
       stage: 'package_sent'
     };
   }
