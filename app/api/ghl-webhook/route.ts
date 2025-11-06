@@ -197,15 +197,33 @@ async function findOrCreateContactGHL(data: {
  * Determine event type from GHL pipeline stage
  */
 function determineEventTypeFromStage(body: any): string {
-  const stage = (body.pipleline_stage || body.pipeline_stage || '').toLowerCase();
+  // Check customData.pipeline_stage FIRST (user's hardcoded values)
+  const customData = body.customData || {};
+  const customStage = (customData.pipeline_stage || '').toLowerCase();
+  const ghlStage = (body.pipleline_stage || body.pipeline_stage || '').toLowerCase();
 
-  if (stage.includes('scheduled') || stage.includes('booked')) {
+  // User's hardcoded stages always take priority
+  if (customStage === 'form_filled') {
     return 'OpportunityCreate';
   }
-  if (stage.includes('completed') || stage.includes('attended')) {
+  if (customStage === 'meeting_booked') {
+    return 'OpportunityCreate';
+  }
+  if (customStage === 'meeting_attended') {
     return 'MeetingCompleted';
   }
-  if (stage.includes('package') || stage.includes('sent')) {
+  if (customStage === 'package_sent') {
+    return 'PackageSent';
+  }
+
+  // Fallback to GHL's stage names
+  if (ghlStage.includes('scheduled') || ghlStage.includes('booked')) {
+    return 'OpportunityCreate';
+  }
+  if (ghlStage.includes('completed') || ghlStage.includes('attended')) {
+    return 'MeetingCompleted';
+  }
+  if (ghlStage.includes('package') || ghlStage.includes('sent')) {
     return 'PackageSent';
   }
 
