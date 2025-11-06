@@ -29,10 +29,10 @@ const supabase = createClient(supabaseUrl, supabaseKey, {
 });
 
 async function applyMigration() {
-  console.log('🚀 Applying dynamic update function migration...\n');
+  console.log('🚀 Applying duplicate mc_id fix migration...\n');
 
   // Read the migration file
-  const migrationPath = join(__dirname, 'migration_update_contact_dynamic.sql');
+  const migrationPath = join(__dirname, 'migrations', 'fix_duplicate_mc_id_upsert.sql');
   const migrationSQL = readFileSync(migrationPath, 'utf8');
 
   // Split by statement (basic splitting on semicolons outside of function bodies)
@@ -79,24 +79,14 @@ async function applyMigration() {
     }
   }
 
-  // Test the function
-  console.log('🧪 Testing the new function...\n');
-
-  const { data: testResult, error: testError } = await supabase
-    .rpc('test_update_contact_dynamic');
-
-  if (testError) {
-    console.error('❌ Test failed:', testError.message);
-  } else {
-    console.log('✅', testResult);
-  }
-
-  console.log('\n✨ Migration complete! You can now use update_contact_dynamic() function.');
+  console.log('\n✨ Migration complete! create_contact_with_mc_id() now handles duplicates gracefully.');
+  console.log('🎉 The duplicate mc_id error is now fixed!');
+  console.log('📊 Test it by having a contact go through your ManyChat funnel.');
 }
 
 applyMigration().catch(err => {
   console.error('❌ Error:', err.message);
   console.log('\n📋 If automatic application failed, copy the SQL from:');
-  console.log('   migration_update_contact_dynamic.sql');
+  console.log('   migrations/fix_duplicate_mc_id_upsert.sql');
   console.log('   and paste it into Supabase SQL Editor manually.');
 });
