@@ -63,7 +63,8 @@ export async function POST(request: NextRequest) {
       email: email,
       phone: phone,
       firstName: customData.first_name || body.first_name,
-      lastName: customData.last_name || body.last_name
+      lastName: customData.last_name || body.last_name,
+      source: customData.source || null
     });
 
     // Build update data based on event
@@ -140,6 +141,7 @@ async function findOrCreateContactGHL(data: {
   phone?: string;
   firstName?: string;
   lastName?: string;
+  source?: string | null;
 }): Promise<string> {
   // Try smart finder (checks GHL_ID, email, phone)
   const { data: existingId } = await supabaseAdmin
@@ -170,7 +172,7 @@ async function findOrCreateContactGHL(data: {
       contact_first_name: data.firstName || null,
       contact_last_name: data.lastName || null,
       contact_stage: 'form_submitted',
-      contact_source: 'website'
+      contact_source: data.source || 'website'  // Use provided source or default to website
     });
 
   if (error) {
@@ -216,8 +218,8 @@ function buildGHLUpdateData(eventType: string, body: any) {
     MC_ID: customData.MC_ID || customFields.MC_ID || null,
     AD_ID: customData.AD_ID || customFields.AD_ID || null,
     thread_ID: customData.THREAD_ID || customFields.THREAD_ID || null,
-    // Source logic: MC_ID OR AD_ID = Instagram, otherwise website
-    source: (customData.MC_ID || customFields.MC_ID || customData.AD_ID || customFields.AD_ID) ? 'instagram' : 'website',
+    // Source logic: Use explicit source if provided, otherwise infer from MC_ID/AD_ID
+    source: customData.source || ((customData.MC_ID || customFields.MC_ID || customData.AD_ID || customFields.AD_ID) ? 'instagram' : 'website'),
     updated_at: new Date().toISOString()
   };
 
