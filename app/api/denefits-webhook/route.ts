@@ -120,15 +120,15 @@ export async function POST(request: NextRequest) {
     const totalAmount = totalPurchases?.reduce((sum, p) => sum + Number(p.amount), 0) || financedAmount;
 
     const { error: updateError } = await supabaseAdmin
-      .from('contacts')
-      .update({
-        email_payment: email,
-        purchase_date: new Date().toISOString(),
-        purchase_amount: totalAmount,  // Total from ALL payments
-        stage: 'purchased',
-        updated_at: new Date().toISOString()
-      })
-      .eq('id', contactId);
+      .rpc('update_contact_dynamic', {
+        contact_id: contactId,
+        update_data: {
+          email_payment: email,
+          purchase_date: new Date().toISOString(),
+          purchase_amount: totalAmount,  // Total from ALL payments
+          stage: 'purchased'
+        }
+      });
 
     if (updateError) {
       console.error('Error updating contact:', updateError);

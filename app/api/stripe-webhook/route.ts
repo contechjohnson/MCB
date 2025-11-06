@@ -78,6 +78,10 @@ export async function POST(request: NextRequest) {
 
     // Handle different event types
     switch (event.type) {
+      case 'checkout.session.created':
+        await handleCheckoutCreated(event);
+        break;
+
       case 'checkout.session.completed':
         await handleCheckoutCompleted(event);
         break;
@@ -114,9 +118,47 @@ export async function GET() {
     message: 'Stripe webhook endpoint is live',
     endpoints: {
       POST: 'Receives Stripe webhooks (requires signature)',
-      events: ['checkout.session.completed', 'checkout.session.expired', 'charge.refunded']
+      events: ['checkout.session.created', 'checkout.session.completed', 'checkout.session.expired', 'charge.refunded']
     }
   });
+}
+
+/**
+ * Handle checkout session created (when customer starts checkout)
+ */
+async function handleCheckoutCreated(event: Stripe.Event) {
+  const session = event.data.object as Stripe.Checkout.Session;
+
+  const email = session.customer_email?.toLowerCase().trim();
+
+  if (!email) {
+    console.error('No email in checkout session created');
+    return;
+  }
+
+  // Find contact by email
+  const { data: contactId } = await supabaseAdmin
+    .rpc('find_contact_by_email', { search_email: email });
+
+  if (!contactId) {
+    console.warn('No contact found for checkout started:', email);
+    return;
+  }
+
+  // Update contact with checkout started timestamp
+  const { error: updateError } = await supabaseAdmin
+    .rpc('update_contact_dynamic', {
+      contact_id: contactId,
+      update_data: {
+        checkout_started: new Date().toISOString()
+      }
+    });
+
+  if (updateError) {
+    console.error('Error updating contact with checkout started:', updateError);
+  }
+
+  console.log(`Checkout started for contact ${contactId}`);
 }
 
 /**
@@ -172,16 +214,16 @@ async function handleCheckoutCompleted(event: Stripe.Event) {
   const totalAmount = totalPurchases?.reduce((sum, p) => sum + Number(p.amount), 0) || amount;
 
   const { error: updateError } = await supabaseAdmin
-    .from('contacts')
-    .update({
-      email_payment: email,
-      stripe_customer_id: customerId,
-      purchase_date: new Date().toISOString(),
-      purchase_amount: totalAmount,  // Total from ALL payments
-      stage: 'purchased',
-      updated_at: new Date().toISOString()
-    })
-    .eq('id', contactId);
+    .rpc('update_contact_dynamic', {
+      contact_id: contactId,
+      update_data: {
+        email_payment: email,
+        stripe_customer_id: customerId,
+        purchase_date: new Date().toISOString(),
+        purchase_amount: totalAmount,  // Total from ALL payments
+        stage: 'purchased'
+      }
+    });
 
   if (updateError) {
     console.error('Error updating contact with purchase:', updateError);
@@ -214,12 +256,12 @@ async function handleCheckoutExpired(event: Stripe.Event) {
 
   // Update contact with checkout started timestamp (they got far enough to start checkout)
   const { error: updateError } = await supabaseAdmin
-    .from('contacts')
-    .update({
-      checkout_started: new Date().toISOString(),
-      updated_at: new Date().toISOString()
-    })
-    .eq('id', contactId);
+    .rpc('update_contact_dynamic', {
+      contact_id: contactId,
+      update_data: {
+        checkout_started: new Date().toISOString()
+      }
+    });
 
   if (updateError) {
     console.error('Error updating contact with expired checkout:', updateError);
@@ -263,12 +305,12 @@ async function handleChargeRefunded(event: Stripe.Event) {
 
   // Update contact (reduce purchase amount)
   const { error: updateError } = await supabaseAdmin
-    .from('contacts')
-    .update({
-      purchase_amount: newAmount,
-      updated_at: new Date().toISOString()
-    })
-    .eq('id', contactId);
+    .rpc('update_contact_dynamic', {
+      contact_id: contactId,
+      update_data: {
+        purchase_amount: newAmount
+      }
+    });
 
   if (updateError) {
     console.error('Error updating contact with refund:', updateError);

@@ -269,6 +269,7 @@ function buildGHLUpdateData(eventType: string, body: any) {
     if (stage === 'package_sent') {
       return {
         ...baseData,
+        package_sent_date: new Date().toISOString(),
         stage: 'package_sent'
       };
     }
@@ -298,6 +299,7 @@ function buildGHLUpdateData(eventType: string, body: any) {
     }
 
     if (stage.includes('package') || stage.includes('sent')) {
+      opportunityData.package_sent_date = new Date().toISOString();
       opportunityData.stage = 'package_sent';
     }
 
