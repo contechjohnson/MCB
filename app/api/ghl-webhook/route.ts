@@ -40,7 +40,8 @@ export async function POST(request: NextRequest) {
     const customData = body.customData || {};
     const ghlContactId = customData.contact_id || body.contact_id;
     const eventType = customData.event_type || body.type || determineEventTypeFromStage(body);
-    const email = (customData.email || body.email)?.toLowerCase().trim();
+    // IMPORTANT: Use body.email first - customData.email sometimes contains host's email
+    const email = (body.email || customData.email)?.toLowerCase().trim();
     const phone = normalizePhone(customData.phone || body.phone);
 
     if (!ghlContactId) {
@@ -236,7 +237,8 @@ function buildGHLUpdateData(eventType: string, body: any) {
   const customFields = body; // Fallback to root level
 
   const baseData: any = {
-    email_booking: (customData.email || body.email)?.toLowerCase().trim() || null,
+    // IMPORTANT: Use body.email first - customData.email sometimes contains host's email
+    email_booking: (body.email || customData.email)?.toLowerCase().trim() || null,
     phone: normalizePhone(customData.phone || body.phone) || null,
     first_name: customData.first_name || body.first_name || null,
     last_name: customData.last_name || body.last_name || null,

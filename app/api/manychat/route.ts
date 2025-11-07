@@ -254,14 +254,17 @@ function buildUpdateData(eventType: string | null, manychatData: any) {
     trigger_word: customFields.trigger_word || customFields['All Tags'] || null,
     subscribed: manychatData.subscribed || null,
     ig_last_interaction: manychatData.ig_last_interaction || null,
-    source: 'instagram',  // ManyChat = Instagram traffic
+    // Source: Use custom field if provided, otherwise default to instagram (or instagram_lm if from lead magnet)
+    // Examples: 'instagram', 'instagram_lm', 'facebook', etc.
+    source: customFields.source || customFields.Source || 'instagram',
     updated_at: new Date().toISOString()
   };
 
   // Question fields (update on ALL events - answers might change!)
+  // Q1 = Symptoms (first question), Q2 = Months (second question)
   const questionFields: any = {
-    Q1_question: customFields['Months Postpartum'] || customFields['How Far Postpartum'] || null,
-    Q2_question: customFields.Symptoms || null,
+    Q1_question: customFields.Symptoms || null,
+    Q2_question: customFields['Months Postpartum'] || customFields['How Far Postpartum'] || null,
     objections: customFields.Objections || null
   };
 
