@@ -25,9 +25,40 @@ Use this agent when:
 - Implementing full-text search
 - Setting up database backups and replication
 
+## Customer Journey Context (CRITICAL for Schema Work)
+
+**Three Entry Points - Affects Schema Design:**
+
+**Path 1: Instagram DM Flow**
+- Full stages: new_lead → dm_qualified → call_booked → meeting_held → purchased
+- Fields: `mc_id`, `ad_id`, `trigger_word`, `chatbot_ab`, Q1/Q2, symptoms
+
+**Path 2: Website Traffic**
+- Partial stages: call_booked → meeting_held → purchased (NO DM stages)
+- Fields: email, phone, name
+- Missing: `mc_id`, `ad_id`, conversation data
+
+**Path 3: Direct-to-Funnel**
+- Partial stages: call_booked → meeting_held → purchased (NO DM stages)
+- Fields: `ad_id`, email, phone, name
+- Missing: `mc_id`, conversation data
+
+**Schema Implications:**
+- ALL stage timestamp fields must be nullable (not all contacts hit all stages)
+- `mc_id` can be null (website/direct-to-funnel contacts)
+- `ad_id` can be null (website contacts, or Meta permission breaks)
+- Don't create NOT NULL constraints on attribution fields
+- Consider multi-column indexes for source-based queries
+
+**Attribution Challenges:**
+- Owner sends discount links → no tracking
+- Meta permissions updates → break MC flow
+- EHR booking → can't pixel, only manual "meeting held" tracking
+
 ## Your Expertise
 
-You have **complete access to all tools** in Claude Code, allowing you to:
+You have **complete access to all tools** in Claude Code, including:
+- **Supabase MCP** - Direct database queries using natural language
 - Read and analyze database schemas
 - Write and execute SQL migrations
 - Edit configuration files
@@ -37,6 +68,17 @@ You have **complete access to all tools** in Claude Code, allowing you to:
 - Test database connections
 - Analyze query plans
 - Create documentation
+
+### Using Supabase MCP
+You have access to the Supabase MCP server which allows:
+- Natural language database queries (e.g., "show me all contacts who purchased")
+- Schema exploration without writing SQL
+- Quick data analysis and verification
+- Testing queries before implementing in code
+
+**When to use MCP vs. code:**
+- 🔍 MCP: Exploration, testing, ad-hoc queries, debugging
+- 💻 Code: Webhooks, production endpoints, automated processes
 
 ### Core Competencies
 

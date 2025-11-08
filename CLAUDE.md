@@ -6,28 +6,79 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## 🚨 CURRENT STATUS (Read This First!)
 
-**Date:** Nov 3, 2025, 10:45 PM
-**Phase:** ✅ WEBHOOKS BUILT & DEPLOYED - Ready for Platform Configuration
+**Last Updated:** November 8, 2025
+**System State:** 🟢 DEPLOYED & ACTIVE
+**Production URL:** https://mcb-dun.vercel.app/
 
-**DEPLOYMENT STATUS:**
-- ✅ Schema v2.1 migrated to Supabase (UUID primary keys, flexible matching)
-- ✅ All 4 webhook endpoints built (ManyChat, GHL, Stripe, Denefits)
-- ✅ Code pushed to GitHub
-- ✅ Deployed to Vercel: `https://mcb-dun.vercel.app/`
-- ⏳ Waiting: Environment variables need to be added to Vercel
-- ⏳ Waiting: Webhooks need to be configured in each platform
+---
 
-**IMMEDIATE NEXT STEPS (Morning):**
-1. Follow `DEPLOYMENT_CHECKLIST.md` (start at Step 2)
-2. Add environment variables to Vercel (especially Stripe keys)
-3. Set up Stripe webhook (easiest, do first)
-4. Set up GHL webhook in workflows
-5. Set up ManyChat External Request blocks
-6. Update Denefits Make.com scenario URL
+### ⚠️ CRITICAL: ALWAYS CHECK THE DATE
 
-**User Note:** ManyChat will pass full contact data in webhook payload (not use custom fields for dates). Webhook will map data appropriately on server side.
+**Current Date:** November 8, 2025 (NOT January!)
 
-**Full context:** See `START_HERE_WEBHOOKS.md` and `DEPLOYMENT_CHECKLIST.md`
+**Common Error:** Claude sessions often misread the date as January 2025 due to confusion in documentation.
+
+**Before ANY date-based queries:**
+1. Check `<env>` for "Today's date"
+2. Verify it's November 2025
+3. Calculate "last 30 days" from NOVEMBER, not January
+4. System went live in early November 2025
+
+**This affects:**
+- "Show me last 30 days" queries → Must use November 2025 as reference
+- Database queries with date filters → Use November 2025
+- Report generation → Weekly reports are from November 2025 onward
+
+---
+
+### ⚡ Quick Status
+
+**For detailed system status, feature status, known issues, and data metrics:**
+👉 **See `CURRENT_STATUS.md`** (single source of truth, updated weekly)
+
+---
+
+### 🎯 What's Live Right Now
+
+| System | Status | Details |
+|--------|--------|---------|
+| **Webhooks** | 🟢 LIVE | Stripe, GHL, ManyChat, Denefits, Perspective all active |
+| **Database** | 🟢 LIVE | 160+ contacts, receiving real-time data |
+| **Meta Ads Sync** | 🟢 LIVE | 38 ads tracked with creative data |
+| **AI Weekly Reports** | 🟢 LIVE | Automated reports every Friday 5:17 PM UTC |
+| **Historical Data** | 🟢 COMPLETE | 537 contacts imported from Airtable |
+
+---
+
+### 🔴 Critical Issues (Active Investigation)
+
+- **MC→GHL Linkage: 7.9%** - Can't track full funnel (DM → Booking)
+- **Orphan Payments: 100%** - 2 payments ($5.5K) unlinked to contacts
+
+**For troubleshooting:** See `CURRENT_STATUS_REPORT.md`
+
+---
+
+### 📚 Documentation Quick Start
+
+**New AI agents start here:**
+1. **CURRENT_STATUS.md** (5 min) ← System state, features, issues
+2. **This file (CLAUDE.md)** (10 min) ← Project guide, how to help user
+3. **SYSTEM_ARCHITECTURE.md** (5 min) ← System design *[if exists]*
+4. **Task-specific guides** as needed
+
+**Total onboarding: ~20 minutes**
+
+---
+
+### 🔗 Key Resources
+
+- **System Status:** `CURRENT_STATUS.md` ← **Check this first**
+- **Webhooks:** `WEBHOOK_GUIDE.md`
+- **Weekly Reports:** `WEEKLY_REPORT_DEPLOYMENT.md`
+- **Meta Ads:** `META_ADS_INTEGRATION_GUIDE.md`
+- **Historical Data:** `HISTORICAL_DATA_MAPPING.md`
+- **Documentation Audit:** `DOCUMENTATION_AUDIT_REPORT.md`
 
 ---
 
@@ -46,24 +97,37 @@ The user is doing "vibe coding" - they understand the concepts but not all the t
 - If something breaks, explain what went wrong in plain English
 - Don't assume deep knowledge of Next.js, databases, or TypeScript
 
-## Project Structure (Updated Nov 3, 2025)
+## Project Structure (Updated Nov 8, 2025)
 
 ```
 /app
   /api
-    /manychat/route.ts        # ManyChat webhook (DM qualified, link tracking)
-    /ghl-webhook/route.ts     # GoHighLevel webhook (bookings, meetings)
-    /stripe-webhook/route.ts  # Stripe webhook (payments, refunds)
-    /denefits-webhook/route.ts # Denefits webhook (BNPL financing)
+    /manychat/route.ts           # ManyChat webhook (DM qualified, link tracking)
+    /ghl-webhook/route.ts        # GoHighLevel webhook (bookings, meetings)
+    /stripe-webhook/route.ts     # Stripe webhook (payments, refunds)
+    /denefits-webhook/route.ts   # Denefits webhook (BNPL financing)
+    /perspective-webhook/route.ts # Perspective checkout abandonment
+    /reports/weekly-data/route.ts # Weekly analytics API
+    /cron/generate-report/route.ts # AI report generation (Fridays 5:17 PM)
   layout.tsx
   page.tsx
 
-/historical_data    # CSV files and Airtable exports (not in database)
+/historical_data    # CSV files and Airtable exports (537 contacts imported)
 
-/Setup Guides       # Copy-paste guides for each platform
-  DEPLOYMENT_CHECKLIST.md    # Main deployment guide (START HERE)
-  START_HERE_WEBHOOKS.md     # Overview of webhook system
-  SETUP_STRIPE.md            # Stripe webhook setup (easiest)
+/scripts            # Production utilities and analysis scripts
+  sync-meta-ads.js         # Meta Ads daily sync
+  weekly-report-ai.js      # Generate AI reports
+  (47 total - see scripts/README.md for full index)
+
+/.claude            # Claude Code configuration
+  /agents           # Specialized subagents
+  /commands         # Custom slash commands
+  /skills           # Reusable skills
+
+/docs               # Setup guides and technical documentation
+  DEPLOYMENT_CHECKLIST.md    # Main deployment guide
+  WEBHOOK_GUIDE.md           # Technical webhook reference
+  SETUP_STRIPE.md            # Stripe webhook setup
   SETUP_GHL.md               # GoHighLevel webhook setup
   SETUP_MANYCHAT.md          # ManyChat webhook setup
   SETUP_DENEFITS.md          # Denefits Make.com setup
@@ -93,30 +157,115 @@ npm run type-check
 
 ## How This System Works
 
-### The Data Flow (Simple Version)
+### Customer Journey: Three Entry Points
 
-1. **Something happens** → Customer books appointment, makes payment, etc.
-2. **Webhook fires** → Stripe/GHL/ManyChat sends data to your API endpoint
-3. **Your code catches it** → API route receives the webhook
-4. **Store in Supabase** → Data gets saved to database
-5. **Query later** → Run reports, send emails with insights
+The system tracks customers through different entry points, each with different data collection:
 
-### The Three Main Webhooks
+#### 🔵 **Path 1: Instagram DM Flow (Full Attribution)**
+```
+New Lead → DM Qualified → Link Sent → Link Clicked → Form Submitted →
+Meeting Held → Package Sent → Checkout Started → Purchased
+```
 
-**1. Stripe Webhook** (`/api/stripe-webhook`)
-- Fires when: Someone pays, refunds happen, checkout expires
-- What it does: Saves payment info, links it to a contact by email
-- **Important**: Always returns status 200 (even on errors) so Stripe doesn't retry endlessly
+**What we capture:**
+- `ad_id` - Meta Ads ID (from ManyChat parameters)
+- `mc_id` - ManyChat subscriber ID
+- `trigger_word` - heal, thrive, etc. (separates paid vs organic)
+- `chatbot_ab` - A/B test variant
+- Full conversation data (Q1, Q2, symptoms, objections)
+
+**Webhooks involved:** ManyChat → GHL → Stripe/Denefits
+
+---
+
+#### 🟢 **Path 2: Website Traffic (Mid-Funnel Entry)**
+```
+[Skips: New Lead, DM Qualified, Link stages]
+Form Submitted → Meeting Held → Package Sent → Checkout Started → Purchased
+```
+
+**What we capture:**
+- Email, phone, name from form
+- `source` = 'website'
+- **No** `ad_id` (no attribution)
+- **No** ManyChat data
+
+**Webhooks involved:** GHL → Stripe/Denefits
+
+---
+
+#### 🟡 **Path 3: Direct-to-Funnel (Bottom of Funnel)**
+```
+[Skips: New Lead, DM Qualified, Link stages]
+Form Submitted → Meeting Held → Package Sent → Checkout Started → Purchased
+```
+
+**What we capture:**
+- `ad_id` - Meta Ads ID (from ad click parameters)
+- `source` = 'instagram'
+- Email, phone, name from form
+- **No** ManyChat conversation data
+
+**Webhooks involved:** GHL → Stripe/Denefits
+
+---
+
+### ⚠️ Attribution Challenges
+
+**Known Issues:**
+1. **Discount Links** - Owner sends discount links with no tracking → attribution lost
+2. **Meta Permissions Updates** - Break ManyChat attribution flow periodically → deflates `ad_id` capture
+3. **EHR Booking System** - Can't pixel actual bookings → only track "Meeting Held" via manual GHL form submission
+
+**Current Performance:**
+- AD_ID capture: ~35% (low due to organic traffic + Meta permission breaks)
+- MC→GHL linkage: ~7.9% (investigating email matching issues)
+
+---
+
+### Stage Definitions
+
+| Stage | Description | How It's Set |
+|-------|-------------|--------------|
+| `new_lead` | Opted into ManyChat | ManyChat webhook (subscribe event) |
+| `dm_qualified` | Completed DM conversation | ManyChat webhook (qualification detected) |
+| `call_booked` | Submitted booking form | GHL webhook (form submission) |
+| `meeting_held` | Attended appointment | GHL webhook (manual team submission) |
+| `purchased` | Completed payment | Stripe or Denefits webhook |
+
+**Note:** Not all contacts go through all stages (depends on entry point).
+
+---
+
+### The Five Main Webhooks
+
+**1. ManyChat Webhook** (`/api/manychat`)
+- Fires when: DM conversation, qualification, link clicks
+- Creates: Contact with `mc_id`, captures `ad_id`, trigger words, Q&A data
+- Stage transitions: new_lead → dm_qualified
 
 **2. GoHighLevel Webhook** (`/api/ghl-webhook`)
-- Fires when: Someone books, attends, or gets sent a package
-- What it does: Creates or updates contact records
-- **Important**: Auto-creates contacts if they don't exist (finds by email)
+- Fires when: Form submit, meeting held, package sent
+- Updates: Contact with `ghl_id`, links via email matching
+- Stage transitions: call_booked → meeting_held
+- **Critical:** Can't pixel EHR bookings, team manually submits "meeting held" form
 
-**3. ManyChat Webhook** (`/api/manychat` or `/api/ai-router`)
-- Fires when: Bot conversations happen
-- What it does: Tracks conversation progress, symptoms, engagement
-- Not built yet in clean version
+**3. Stripe Webhook** (`/api/stripe-webhook`)
+- Fires when: Payment success, refund, checkout expiration
+- Creates: Payment record, links to contact via email
+- Stage transition: → purchased (pay in full)
+- **Important**: Always returns 200 (prevents retry storms)
+
+**4. Denefits Webhook** (`/api/denefits-webhook`)
+- Fires when: BNPL financing approved/paid
+- Creates: Payment record (source = 'denefits')
+- Stage transition: → purchased (buy now pay later)
+- Routed via Make.com
+
+**5. Perspective Webhook** (`/api/perspective-webhook`)
+- Fires when: Checkout abandonment detected
+- Updates: Contact with `checkout_abandoned_date`
+- No stage change (tracks drop-off)
 
 ## Supabase Database (Where the Data Lives)
 
@@ -251,14 +400,23 @@ You can query these in the Supabase dashboard (SQL Editor).
 
 ## Historical Data (CSVs & Airtable)
 
-Your old data lives in `/historical_data/` folder. This data **doesn't** go into the Supabase database.
+Your old data lives in `/historical_data/` folder. This data CAN be migrated into Supabase to provide complete attribution.
 
-When you need to analyze it:
-1. Drop the CSV in that folder
-2. We'll write a quick Python script or Node.js script to read it
-3. Generate insights separate from the main system
+**For Historical Data Migration**:
+1. **READ FIRST**: See `HISTORICAL_DATA_MAPPING.md` for complete migration guide
+2. That guide explains:
+   - How to map old data to new database structure
+   - Stage progression rules (new_lead → dm_qualified → ... → purchased)
+   - Required vs optional fields
+   - Stage inference when timestamps are missing
+   - Common data source mappings (Airtable, Stripe, GHL, ManyChat)
+3. Most critical for attribution: `stage`, `purchase_date`, `purchase_amount`
+4. Always check for existing contacts before inserting (avoid duplicates)
 
-This keeps the database clean and purpose-built for new data only.
+**Quick Migration Priority**:
+- ✅ Customers who purchased (stage = 'purchased')
+- ✅ Customers who attended meetings (stage = 'meeting_held')
+- ⏭️ Everyone else (as needed)
 
 ## Archived Code
 
@@ -442,6 +600,45 @@ All tools should work without prompts. If you're asked for permission:
 2. It should contain: `{"permissions": {"allow": ["*"], "deny": [], "ask": []}}`
 3. If it doesn't, update it and tell the user to restart their terminal
 
+## Custom Slash Commands & Specialized Agents
+
+### Available Slash Commands
+
+This project has custom commands for common analytics tasks. All use the `analytics-agent` subagent:
+
+| Command | Description | Usage |
+|---------|-------------|-------|
+| `/db-status` | Check database health and metrics | `/db-status` |
+| `/data-quality` | Run data quality checks | `/data-quality [source]` |
+| `/funnel` | Analyze conversion funnel | `/funnel [time-range]` |
+| `/source-performance` | Compare performance by source | `/source-performance [time-range]` |
+| `/recent-activity` | Show recent contacts/events | `/recent-activity [limit]` |
+| `/weekly-report` | Generate comprehensive report | `/weekly-report [time-range]` |
+| `/project-info` | Display project overview | `/project-info` |
+
+**Example usage:**
+```
+/data-quality instagram
+/funnel last 30 days
+/weekly-report last 7 days
+```
+
+### Specialized Subagents
+
+| Agent | Purpose | When to Use |
+|-------|---------|-------------|
+| `analytics-agent` | Database queries & reporting | Data analysis, funnel metrics, quality checks |
+| `supabase-expert` | Database design & optimization | Schema changes, migrations, complex queries |
+| `api-integrations` | External API webhooks | Webhook debugging, new integrations |
+| `manychat-webhook` | ManyChat-specific logic | ManyChat webhook issues |
+| `openai-assistant` | AI report generation | Weekly report automation |
+| `nextjs-setup` | Next.js configuration | App Router, API routes, deployment |
+| `supabase-setup` | Initial Supabase setup | New projects, configuration |
+
+**Note:** These are invoked automatically by Claude Code when relevant. You don't need to call them directly unless testing.
+
+---
+
 ## Important Rules
 
 1. **Webhooks always return 200** - Even if there's an error, return success status to prevent infinite retries
@@ -450,3 +647,4 @@ All tools should work without prompts. If you're asked for permission:
 4. **Keep it simple** - Don't over-engineer, just make it work
 5. **Data first** - Focus on collecting clean data, not building fancy UIs
 6. **Always use Firecrawl for web tasks** - Never use WebSearch, always use Firecrawl MCP
+7. **Never modify webhook code without explicit user request** - Webhooks are fragile and critical for attribution
