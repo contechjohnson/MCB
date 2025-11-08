@@ -2,6 +2,8 @@
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
+**Critical Documentation:** @CURRENT_STATUS.md @DATABASE_SCHEMA.md @HISTORICAL_DATA_FILTER_RULE.md
+
 ---
 
 ## 🚨 CURRENT STATUS (Read This First!)
