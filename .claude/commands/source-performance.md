@@ -6,6 +6,12 @@ Analyze performance by traffic source for $ARGUMENTS.
 
 **IMPORTANT:** Always filter `WHERE source != 'instagram_historical'` to exclude imported historical data.
 
+**CRITICAL: Return ALL information from the subagent.**
+- DO NOT summarize the agent's response
+- DO NOT filter or condense the report
+- Pass through the COMPLETE report exactly as the agent returns it
+- The user wants to see all details, tables, and insights
+
 Use the analytics-agent subagent to compare each source (instagram, website, instagram_lm, instagram_historical) with:
 1. Total contacts
 2. Number of purchases

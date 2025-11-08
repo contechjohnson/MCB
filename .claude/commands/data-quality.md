@@ -6,6 +6,12 @@ Run a comprehensive data quality check with filter: $ARGUMENTS.
 
 **IMPORTANT:** Always filter `WHERE source != 'instagram_historical'` to exclude imported historical data from quality checks.
 
+**CRITICAL: Return ALL information from the subagent.**
+- DO NOT summarize the agent's response
+- DO NOT filter or condense the report
+- Pass through the COMPLETE report exactly as the agent returns it
+- The user wants to see all details, tables, and insights
+
 Use the analytics-agent subagent to check for:
 1. Missing critical fields (email, name, mc_id/ghl_id)
 2. Q1/Q2 field mapping issues (swapped or incorrect data)
