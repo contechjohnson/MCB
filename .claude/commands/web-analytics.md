@@ -4,6 +4,12 @@ description: Run analytics queries using the web-optimized analytics agent
 
 Run analytics query using the web agent: $ARGUMENTS
 
+**CRITICAL INSTRUCTIONS FOR PRIMARY AGENT:**
+1. **DO NOT SUMMARIZE** - Pass the FULL response from the subagent to the user
+2. **DO NOT CREATE FILES** - Display everything in the terminal
+3. **PASS-THROUGH MODE** - Your job is to invoke the subagent and relay its complete output to the user
+4. When the subagent returns results, output the ENTIRE response verbatim to the terminal
+
 **IMPORTANT:** Always filter `WHERE source != 'instagram_historical'` to exclude imported historical data.
 
 Use the **analytics-agent-web** subagent (optimized for Claude Code Web) to:
@@ -64,4 +70,14 @@ If no specific query is provided, show a dashboard with:
 - Results are formatted for web display
 - Supports natural language queries
 
-Present results as markdown tables with insights and actionable recommendations.
+## Output Requirements
+
+**FOR PRIMARY AGENT:**
+- **DO NOT** write a summary of what the agent did
+- **DO NOT** say "The agent returned..." or "Here's a summary..."
+- **DO** output the COMPLETE response from the analytics-agent-web subagent
+- **DO** preserve all markdown formatting, tables, and insights
+- **DO NOT** create any files - display everything in terminal
+- Think of yourself as a transparent proxy - the user should see the full agent output as if they called it directly
+
+Present results exactly as the subagent provides them: markdown tables with insights and actionable recommendations.
