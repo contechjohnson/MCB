@@ -625,12 +625,29 @@ This project has custom commands for common analytics tasks. All use the `analyt
 | `/recent-activity` | Show recent contacts/events | `/recent-activity [limit]` |
 | `/weekly-report` | Generate comprehensive report | `/weekly-report [time-range]` |
 | `/project-info` | Display project overview | `/project-info` |
+| `/web-analytics` | Web-optimized analytics (use for cloud instances) | `/web-analytics [query]` |
 
 **Example usage:**
 ```
 /data-quality instagram
 /funnel last 30 days
 /weekly-report last 7 days
+/web-analytics show funnel for last 30 days
+```
+
+**⚠️ Important for Cloud Instances:**
+If you are running as a **Claude Code Web instance** (cloud environment), use `/web-analytics` instead of the other analytics commands. This command:
+- Uses the `analytics-agent-web` subagent (optimized for web MCP configuration)
+- Passes full results directly to terminal (no summarization)
+- Supports natural language queries
+- Works in cloud environments without local database access
+
+**Example web-analytics usage:**
+```
+/web-analytics show recent purchases
+/web-analytics what are the orphan payments
+/web-analytics MC to GHL linkage rate
+/web-analytics compare conversion by source
 ```
 
 ### Specialized Subagents
