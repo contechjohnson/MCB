@@ -1,0 +1,408 @@
+{
+  "client": {
+    "id": "mcb",
+    "name": "MCB",
+    "full_name": "Postpartum Care USA",
+    "domain": "postpartumcareusa.com",
+    "timezone": "America/Los_Angeles",
+    "industry": "healthcare",
+    "business_model": "coaching_program"
+  },
+
+  "platforms": {
+    "manychat": {
+      "enabled": true,
+      "field_mappings": {
+        "qualification_1": {
+          "source_field": "Symptoms",
+          "db_column": "Q1_question",
+          "label": "What symptoms are you experiencing?",
+          "type": "text"
+        },
+        "qualification_2": {
+          "source_field": "Months Postpartum",
+          "db_column": "Q2_question",
+          "label": "How many months postpartum are you?",
+          "type": "text"
+        },
+        "lead_summary": {
+          "source_field": "Cody > Response",
+          "db_column": "lead_summary",
+          "label": "AI conversation summary"
+        },
+        "ab_test": {
+          "source_field": "chatbot_AB",
+          "db_column": "chatbot_AB",
+          "label": "Chatbot variant"
+        },
+        "objections": {
+          "source_field": "Objections",
+          "db_column": "objections",
+          "label": "Recorded objections"
+        },
+        "trigger_word": {
+          "source_field": "All Tags",
+          "db_column": "trigger_word",
+          "label": "Conversation trigger"
+        }
+      },
+      "date_fields": {
+        "link_sent": "DATE_LINK_SENT",
+        "link_clicked": "DATE_LINK_CLICKED",
+        "form_filled": "DATE_FORM_FILLED",
+        "dm_qualified": "DATE_DM_QUALIFIED",
+        "meeting_booked": "DATE_MEETING_BOOKED",
+        "meeting_held": "DATE_MEETING_HELD"
+      }
+    },
+
+    "gohighlevel": {
+      "enabled": true,
+      "stage_mapping": {
+        "form_filled": "form_submitted",
+        "meeting_booked": "meeting_booked",
+        "meeting_attended": "meeting_held",
+        "package_sent": "package_sent"
+      },
+      "custom_fields": {
+        "mc_id": "MC_ID",
+        "ad_id": "AD_ID",
+        "thread_id": "THREAD_ID",
+        "pipeline_stage": "pipeline_stage",
+        "discovery_call_time": "Discovery Call Time (EST)"
+      },
+      "email_priority": "body_first"
+    },
+
+    "stripe": {
+      "enabled": true,
+      "events": [
+        "checkout.session.created",
+        "checkout.session.completed",
+        "checkout.session.expired",
+        "charge.refunded"
+      ],
+      "payment_types": {
+        "checkout_completed": "buy_in_full"
+      }
+    },
+
+    "denefits": {
+      "enabled": true,
+      "events": [
+        "contract.created",
+        "contract.payments.recurring_payment"
+      ],
+      "payment_type": "buy_now_pay_later",
+      "field_mappings": {
+        "contract_id": "data.contract.contract_id",
+        "contract_code": "data.contract.contract_code",
+        "customer_email": "data.contract.customer_email",
+        "financed_amount": "data.contract.financed_amount",
+        "downpayment": "data.contract.downpayment_amount",
+        "recurring_amount": "data.contract.recurring_amount",
+        "num_payments": "data.contract.number_of_payments"
+      }
+    },
+
+    "perspective": {
+      "enabled": true,
+      "events": ["checkout.abandoned"],
+      "tracking": "checkout_started"
+    },
+
+    "meta_ads": {
+      "enabled": true,
+      "ad_account_id": "act_199993829749361",
+      "api_version": "v20.0",
+      "creative_themes": [
+        "symptom_focus",
+        "transformation_story",
+        "expert_credibility",
+        "social_proof",
+        "urgency_scarcity"
+      ],
+      "sync_schedule": "daily"
+    }
+  },
+
+  "funnel": {
+    "stages": [
+      {
+        "name": "new_lead",
+        "label": "New Lead",
+        "description": "Subscribed to ManyChat bot",
+        "entry_points": ["manychat:contact_created"]
+      },
+      {
+        "name": "DM_qualified",
+        "label": "DM Qualified",
+        "description": "Answered both qualification questions",
+        "entry_points": ["manychat:dm_qualified"]
+      },
+      {
+        "name": "landing_link_sent",
+        "label": "Link Sent",
+        "description": "Booking link sent via chatbot",
+        "entry_points": ["manychat:link_sent"]
+      },
+      {
+        "name": "landing_link_clicked",
+        "label": "Link Clicked",
+        "description": "Clicked booking link",
+        "entry_points": ["manychat:link_clicked"]
+      },
+      {
+        "name": "form_submitted",
+        "label": "Form Submitted",
+        "description": "Submitted booking form in GHL",
+        "entry_points": ["ghl:form_filled", "ghl:opportunity_created"]
+      },
+      {
+        "name": "meeting_booked",
+        "label": "Meeting Booked",
+        "description": "Discovery call scheduled",
+        "entry_points": ["ghl:meeting_booked"]
+      },
+      {
+        "name": "meeting_held",
+        "label": "Meeting Held",
+        "description": "Attended discovery call",
+        "entry_points": ["ghl:meeting_attended"]
+      },
+      {
+        "name": "package_sent",
+        "label": "Package Sent",
+        "description": "Proposal/package sent after call",
+        "entry_points": ["ghl:package_sent"]
+      },
+      {
+        "name": "purchased",
+        "label": "Purchased",
+        "description": "Completed payment",
+        "entry_points": [
+          "stripe:checkout_completed",
+          "denefits:contract_created"
+        ]
+      },
+      {
+        "name": "feedback_requested",
+        "label": "Feedback Requested",
+        "description": "Sent feedback request (~3mo post-purchase)",
+        "entry_points": ["manual:feedback_sent"]
+      },
+      {
+        "name": "feedback_received",
+        "label": "Feedback Received",
+        "description": "Submitted feedback/testimonial",
+        "entry_points": ["manual:feedback_received"]
+      }
+    ],
+    "progression_rules": {
+      "allow_backtrack": false,
+      "auto_advance_on_payment": true,
+      "skip_stages_allowed": true
+    }
+  },
+
+  "custom_database_columns": {
+    "contacts": [
+      {
+        "name": "Q1_question",
+        "type": "TEXT",
+        "label": "Symptoms",
+        "category": "qualification"
+      },
+      {
+        "name": "Q2_question",
+        "type": "TEXT",
+        "label": "Months Postpartum",
+        "category": "qualification"
+      },
+      {
+        "name": "objections",
+        "type": "TEXT",
+        "label": "Objections",
+        "category": "sales_intelligence"
+      },
+      {
+        "name": "chatbot_AB",
+        "type": "TEXT",
+        "label": "Chatbot Variant",
+        "category": "ab_testing"
+      },
+      {
+        "name": "trigger_word",
+        "type": "TEXT",
+        "label": "Trigger Word",
+        "category": "marketing"
+      },
+      {
+        "name": "lead_summary",
+        "type": "TEXT",
+        "label": "AI Lead Summary",
+        "category": "ai_enrichment"
+      },
+      {
+        "name": "thread_ID",
+        "type": "TEXT",
+        "label": "OpenAI Thread ID",
+        "category": "ai_enrichment"
+      },
+      {
+        "name": "IG",
+        "type": "TEXT",
+        "label": "Instagram Username",
+        "category": "contact_info"
+      },
+      {
+        "name": "ig_id",
+        "type": "TEXT",
+        "label": "Instagram ID",
+        "category": "contact_info"
+      },
+      {
+        "name": "FB",
+        "type": "TEXT",
+        "label": "Facebook Name",
+        "category": "contact_info"
+      }
+    ]
+  },
+
+  "reporting": {
+    "ai_assistant": {
+      "name": "Clara",
+      "model": "gpt-4",
+      "temperature": 0.7,
+      "system_prompt": "You are Clara, an expert analytics assistant for Postpartum Care USA. You provide data-driven insights with empathy and expertise. Focus on helping mothers recover postpartum.",
+      "tone": "expert_empathetic",
+      "audience": "business_stakeholders"
+    },
+
+    "email": {
+      "from": "analytics@postpartumcareusa.com",
+      "from_name": "MCB Analytics",
+      "recipients": ["eric@postpartumcareusa.com"],
+      "subject_template": "📊 Weekly Analytics Report - {{DATE_RANGE}}",
+      "branding": {
+        "logo_url": "https://postpartumcareusa.com/logo.png",
+        "primary_color": "#4A90E2",
+        "company_name": "Postpartum Care USA"
+      }
+    },
+
+    "schedule": {
+      "cron": "0 17 * * 5",
+      "timezone": "UTC",
+      "description": "Every Friday at 5:17 PM UTC (9:17 AM PST)"
+    },
+
+    "metrics": {
+      "focus": [
+        "funnel_conversion",
+        "revenue_growth",
+        "source_attribution",
+        "dm_qualification_rate",
+        "meeting_close_rate"
+      ],
+      "kpis": [
+        {
+          "name": "DM Qualification Rate",
+          "calculation": "dm_qualified / new_leads",
+          "target": 0.60,
+          "format": "percentage"
+        },
+        {
+          "name": "Booking Conversion",
+          "calculation": "meeting_booked / dm_qualified",
+          "target": 0.25,
+          "format": "percentage"
+        },
+        {
+          "name": "Close Rate",
+          "calculation": "purchased / meeting_held",
+          "target": 0.15,
+          "format": "percentage"
+        },
+        {
+          "name": "CAC",
+          "calculation": "ad_spend / new_customers",
+          "target": 500,
+          "format": "currency"
+        },
+        {
+          "name": "ROAS",
+          "calculation": "revenue / ad_spend",
+          "target": 3.0,
+          "format": "ratio"
+        }
+      ]
+    }
+  },
+
+  "integrations": {
+    "make_com": {
+      "enabled": true,
+      "scenarios": [
+        {
+          "name": "Weekly AI Report",
+          "trigger": "schedule",
+          "schedule": "0 17 * * 5",
+          "description": "Generate and email weekly analytics report"
+        },
+        {
+          "name": "Denefits Payment Processor",
+          "trigger": "webhook",
+          "webhook_url": "https://hook.us2.make.com/...",
+          "description": "Process Denefits BNPL payments"
+        }
+      ]
+    },
+
+    "resend": {
+      "enabled": true,
+      "api_version": "v1",
+      "domains": ["postpartumcareusa.com"]
+    },
+
+    "openai": {
+      "enabled": true,
+      "api_version": "v1",
+      "models": ["gpt-4", "gpt-4-turbo"],
+      "assistant_id": "asst_...",
+      "thread_id": "thread_..."
+    }
+  },
+
+  "data_sources": {
+    "historical_import": {
+      "source": "airtable",
+      "table_name": "Master Contact Database",
+      "date_range": "2023-01-01 to 2025-01-06",
+      "record_count": 537,
+      "mapping": {
+        "email": "Email",
+        "first_name": "First Name",
+        "last_name": "Last Name",
+        "source": "Source",
+        "stage": "Stage",
+        "purchase_date": "Purchase Date",
+        "purchase_amount": "Purchase Amount"
+      }
+    }
+  },
+
+  "compliance": {
+    "data_retention": {
+      "webhook_logs": "90_days",
+      "contacts": "indefinite",
+      "payments": "7_years"
+    },
+    "pii_handling": {
+      "anonymize_after": null,
+      "export_on_request": true,
+      "delete_on_request": true
+    }
+  }
+}
