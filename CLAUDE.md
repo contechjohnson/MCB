@@ -647,6 +647,36 @@ This project has custom commands for common analytics tasks. All use the `analyt
 
 ---
 
+## Database Field Rules
+
+### Two Subscribe Date Fields (CRITICAL!)
+
+We have TWO subscribe date fields in the contacts table:
+
+**1. `subscribed` (TIMESTAMPTZ) - THE SOURCE OF TRUTH**
+- From ManyChat API's raw data (`manychatData.subscribed`)
+- When they ACTUALLY subscribed to the chatbot (could be months/years ago)
+- Example: Sept 2024, April 2025
+- Used for: Time-based calculations, cohort analysis, actual customer journey
+
+**2. `subscribe_date` (TIMESTAMPTZ) - When WE First Saw Them**
+- Set by webhook when our system first receives the contact (`new Date().toISOString()`)
+- When YOUR attribution system started tracking them (Nov 2025+)
+- Example: Nov 7, 2025
+- Used for: Data collection tracking, NOT customer journey
+
+**Why This Matters:**
+- Someone subscribed in Sept 2024 but clicked link Nov 7, 2025
+- They have `link_click_date` but no `link_send_date` ✅ **This is correct!**
+- We only started tracking sends on Nov 5, 2025
+- The send happened before we started tracking
+
+**Rules:**
+- Use `subscribed` for time-to-purchase, cohort analysis, customer lifecycle
+- Use `subscribe_date` for "when did we start tracking this person"
+- Don't be alarmed by NULL `link_send_date` for old subscribers
+- Analytics should prefer `subscribed` over `subscribe_date`
+
 ## Important Rules
 
 1. **Webhooks always return 200** - Even if there's an error, return success status to prevent infinite retries
