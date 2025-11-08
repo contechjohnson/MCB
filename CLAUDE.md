@@ -638,6 +638,7 @@ This project has custom commands for common analytics tasks. All use the `analyt
 | Agent | Purpose | When to Use |
 |-------|---------|-------------|
 | `analytics-agent` | Database queries & reporting | Data analysis, funnel metrics, quality checks |
+| `project-auditor` | Project cleanup & reusability | Audit project structure, identify unused files, make repeatable for new clients |
 | `supabase-expert` | Database design & optimization | Schema changes, migrations, complex queries |
 | `api-integrations` | External API webhooks | Webhook debugging, new integrations |
 | `manychat-webhook` | ManyChat-specific logic | ManyChat webhook issues |
@@ -646,6 +647,8 @@ This project has custom commands for common analytics tasks. All use the `analyt
 | `supabase-setup` | Initial Supabase setup | New projects, configuration |
 
 **Note:** These are invoked automatically by Claude Code when relevant. You don't need to call them directly unless testing.
+
+**Project Auditor Usage:** Trigger with "audit the project", "clean up files", "what's unused", or "make this repeatable for other clients". Creates reports in `/audit` folder only.
 
 ---
 
@@ -678,6 +681,122 @@ We have TWO subscribe date fields in the contacts table:
 - Use `subscribe_date` for "when did we start tracking this person"
 - Don't be alarmed by NULL `link_send_date` for old subscribers
 - Analytics should prefer `subscribed` over `subscribe_date`
+
+---
+
+## Meta Ads Data Structure (CRITICAL!)
+
+### How Meta Ads Sync Works
+
+We sync Meta Ads data **daily at 6am UTC** via cron job (`/api/cron/sync-meta-ads`).
+
+**Two data sets are fetched:**
+
+1. **Lifetime Performance** → Stored in `meta_ads` table
+   - Uses `date_preset=maximum` (all-time cumulative data)
+   - Shows total spend since ad was created
+   - Example: Ad created Aug 2023, shows $4,495 total spend
+   - Use for: Overall ROAS, total revenue attribution
+
+2. **Weekly Performance** → Stored in `meta_ad_insights` table
+   - Uses `date_preset=last_7d` (last 7 days only)
+   - Daily snapshots with `snapshot_date` column
+   - Example: Same ad shows $139.86 last 7 days
+   - Use for: "Best ad this week", weekly ROAS, trend analysis
+
+### Database Schema
+
+**meta_ads** (32 active ads)
+- `ad_id` (TEXT, unique) - Meta's ad ID
+- `ad_name` (TEXT) - Human-readable ad name
+- `spend` (NUMERIC) - **LIFETIME** total spend
+- `impressions`, `clicks`, `leads` (INT) - **LIFETIME** totals
+- `date_start`, `date_stop` (DATE) - Span of ad activity
+- `last_synced` (TIMESTAMPTZ) - When we last updated this row
+
+**meta_ad_insights** (daily snapshots)
+- `ad_id` (TEXT) - Links to meta_ads.ad_id
+- `snapshot_date` (DATE) - Date this snapshot represents
+- `spend` (NUMERIC) - **LAST 7 DAYS** spend
+- `impressions`, `clicks`, `leads` (INT) - **LAST 7 DAYS** totals
+- Constraint: UNIQUE(ad_id, snapshot_date)
+
+**meta_ad_creatives** (creative analysis)
+- `ad_id` (TEXT) - Links to meta_ads.ad_id
+- `primary_text`, `headline` - Ad copy
+- `transformation_theme` - Emotional angle (confusion→clarity, etc.)
+- `symptom_focus` (ARRAY) - Symptoms targeted (diastasis, pelvic_floor, etc.)
+- `media_type` - 'video' or 'image'
+
+### How to Calculate Weekly ROAS
+
+```sql
+-- Get weekly ad spend (last 7 days)
+SELECT SUM(spend) as weekly_spend
+FROM meta_ad_insights
+WHERE snapshot_date >= CURRENT_DATE - 7;
+
+-- Get weekly revenue (purchases in last 7 days, exclude historical)
+SELECT SUM(purchase_amount) as weekly_revenue
+FROM contacts
+WHERE purchase_date >= CURRENT_DATE - 7
+  AND source != 'instagram_historical';
+
+-- Calculate weekly ROAS
+SELECT
+  SUM(purchase_amount) / NULLIF(SUM(spend), 0) as weekly_roas
+FROM contacts c
+LEFT JOIN meta_ad_insights mi ON mi.snapshot_date >= CURRENT_DATE - 7
+WHERE c.purchase_date >= CURRENT_DATE - 7
+  AND c.source != 'instagram_historical';
+```
+
+### How to Find "Best Ad This Week"
+
+```sql
+-- Best performing ad by spend (last 7 days)
+SELECT
+  ma.ad_name,
+  mi.spend as weekly_spend,
+  mi.impressions,
+  mi.clicks,
+  ROUND((mi.clicks::numeric / NULLIF(mi.impressions, 0)) * 100, 2) as ctr
+FROM meta_ad_insights mi
+JOIN meta_ads ma ON mi.ad_id = ma.ad_id
+WHERE mi.snapshot_date = CURRENT_DATE
+ORDER BY mi.spend DESC
+LIMIT 1;
+
+-- Best performing ad by CTR (last 7 days)
+ORDER BY (mi.clicks::numeric / NULLIF(mi.impressions, 0)) DESC
+LIMIT 1;
+```
+
+### Important Notes
+
+1. **Lifetime vs Weekly**: Always check which table you're querying
+   - `meta_ads.spend` = ALL-TIME cumulative
+   - `meta_ad_insights.spend` = LAST 7 DAYS only
+
+2. **Sync Schedule**: Script runs daily at 6am UTC (10pm PST / 11pm PDT)
+   - Manual sync: `node scripts/sync-meta-ads-enhanced.js`
+   - Dry run: `node scripts/sync-meta-ads-enhanced.js --dry-run`
+
+3. **Active Ads Only**: We only track ads with `effective_status = 'ACTIVE'`
+   - Currently tracking 32 active ads
+   - Paused/inactive ads are excluded from sync
+
+4. **Historical Data Filter**: When calculating ROAS, ALWAYS exclude historical contacts:
+   ```sql
+   WHERE source != 'instagram_historical'
+   ```
+
+5. **API Credentials Required**:
+   - `META_ACCESS_TOKEN` - Meta Graph API token
+   - `META_AD_ACCOUNT_ID` - Ad account ID (format: act_XXXXX)
+   - `META_API_VERSION` - Optional, defaults to v20.0
+
+---
 
 ## Important Rules
 

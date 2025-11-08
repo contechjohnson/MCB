@@ -24,6 +24,11 @@ cat <<EOF
    ✓ 'subscribe_date' = When we started tracking
    Use 'subscribed' for analytics!
 
+💰 META ADS DATA (TWO TABLES):
+   ✓ 'meta_ads' = LIFETIME spend (all-time cumulative)
+   ✓ 'meta_ad_insights' = LAST 7 DAYS spend (for weekly ROAS)
+   Syncs daily at 6am UTC via cron
+
 🎯 THREE CUSTOMER ENTRY POINTS:
    1. Instagram DM Flow (full attribution)
    2. Website Traffic (no attribution)

@@ -223,13 +223,121 @@ If a query fails:
 3. Suggest a corrected query
 4. Ask if you should try again
 
-## Meta Ads Integration (When Available)
+## Meta Ads Integration (ACTIVE)
 
-If meta ads tables exist, you can query:
-- `meta_ad_campaigns` - campaign performance
-- `meta_ad_sets` - ad set metrics
-- `meta_ad_performance` - individual ad performance
+### Meta Ads Tables Available
 
-Cross-reference with contacts using `ad_id` field.
+**meta_ads** - Lifetime performance (32 active ads)
+- `ad_id` (TEXT, unique) - Meta's ad ID
+- `ad_name` (TEXT) - Human-readable name
+- `spend` (NUMERIC) - **LIFETIME** total spend
+- `impressions`, `clicks`, `leads` (INT) - **LIFETIME** totals
+- `date_start`, `date_stop` (DATE) - Span of activity
+- Synced daily at 6am UTC via cron
+
+**meta_ad_insights** - Daily snapshots for weekly analysis
+- `ad_id` (TEXT) - Links to meta_ads.ad_id
+- `snapshot_date` (DATE) - Date of snapshot
+- `spend` (NUMERIC) - **LAST 7 DAYS** spend
+- `impressions`, `clicks`, `leads` (INT) - **LAST 7 DAYS** totals
+- Use for weekly ROAS and "best ad this week" analysis
+
+**meta_ad_creatives** - Creative analysis
+- `ad_id` (TEXT) - Links to meta_ads.ad_id
+- `primary_text`, `headline` - Ad copy
+- `transformation_theme` - Emotional angle
+- `symptom_focus` (ARRAY) - Symptoms targeted
+- `media_type` - 'video' or 'image'
+
+### Common Meta Ads Queries
+
+5. **Weekly ROAS Calculation:**
+   ```sql
+   -- Weekly ad spend (last 7 days)
+   WITH weekly_spend AS (
+     SELECT SUM(spend) as total_spend
+     FROM meta_ad_insights
+     WHERE snapshot_date >= CURRENT_DATE - 7
+   ),
+   -- Weekly revenue (exclude historical)
+   weekly_revenue AS (
+     SELECT SUM(purchase_amount) as total_revenue
+     FROM contacts
+     WHERE purchase_date >= CURRENT_DATE - 7
+       AND source != 'instagram_historical'
+   )
+   SELECT
+     weekly_spend.total_spend,
+     weekly_revenue.total_revenue,
+     ROUND(weekly_revenue.total_revenue / NULLIF(weekly_spend.total_spend, 0), 2) as weekly_roas
+   FROM weekly_spend, weekly_revenue;
+   ```
+
+6. **Best Performing Ad This Week:**
+   ```sql
+   SELECT
+     ma.ad_name,
+     mi.spend as weekly_spend,
+     mi.impressions,
+     mi.clicks,
+     mi.leads,
+     ROUND((mi.clicks::numeric / NULLIF(mi.impressions, 0)) * 100, 2) as ctr,
+     ROUND(mi.spend / NULLIF(mi.clicks, 0), 2) as cpc
+   FROM meta_ad_insights mi
+   JOIN meta_ads ma ON mi.ad_id = ma.ad_id
+   WHERE mi.snapshot_date = CURRENT_DATE
+   ORDER BY mi.spend DESC
+   LIMIT 10;
+   ```
+
+7. **Lifetime ROAS by Ad:**
+   ```sql
+   SELECT
+     ma.ad_name,
+     ma.spend as lifetime_spend,
+     COUNT(c.id) as attributed_purchases,
+     SUM(c.purchase_amount) as revenue,
+     ROUND(SUM(c.purchase_amount) / NULLIF(ma.spend, 0), 2) as roas
+   FROM meta_ads ma
+   LEFT JOIN contacts c ON c.ad_id = ma.ad_id
+     AND c.purchase_date IS NOT NULL
+     AND c.source != 'instagram_historical'
+   WHERE ma.spend > 0
+   GROUP BY ma.ad_id, ma.ad_name, ma.spend
+   ORDER BY roas DESC;
+   ```
+
+8. **Creative Performance by Theme:**
+   ```sql
+   SELECT
+     mc.transformation_theme,
+     COUNT(DISTINCT ma.ad_id) as num_ads,
+     SUM(ma.spend) as total_spend,
+     SUM(ma.impressions) as total_impressions,
+     SUM(ma.clicks) as total_clicks,
+     ROUND(AVG((ma.clicks::numeric / NULLIF(ma.impressions, 0)) * 100), 2) as avg_ctr
+   FROM meta_ad_creatives mc
+   JOIN meta_ads ma ON mc.ad_id = ma.ad_id
+   WHERE ma.is_active = true
+   GROUP BY mc.transformation_theme
+   ORDER BY total_spend DESC;
+   ```
+
+### Important Notes
+
+**ALWAYS distinguish between:**
+- `meta_ads.spend` = LIFETIME cumulative (all-time)
+- `meta_ad_insights.spend` = LAST 7 DAYS only (for weekly analysis)
+
+**When calculating ROAS:**
+- Always filter `WHERE source != 'instagram_historical'`
+- Use `meta_ad_insights` for weekly ROAS
+- Use `meta_ads` for lifetime ROAS
+- Match contacts to ads via `ad_id` field
+
+**Attribution Reality:**
+- Only 35% of contacts have `ad_id` captured (Meta permission issues)
+- ROAS calculations will be understated due to attribution gaps
+- Use as directional metric, not absolute truth
 
 Remember: You are READ-ONLY. Your job is to illuminate the data, not change it.
