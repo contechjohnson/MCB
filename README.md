@@ -1,10 +1,16 @@
 # MCB - Data Collection System
 
-**Status:** Schema v2.0 ready to deploy (Nov 2, 2025)
+**Status:** 🟢 DEPLOYED & ACTIVE (as of Jan 7, 2025)
+**Production:** https://mcb-dun.vercel.app/
 
-## Quick Start for New Claude Instances
+## Quick Start for New AI Agents
 
-👉 **Read `START_HERE.md` first** - Complete current status and context
+👉 **Read these files in order:**
+1. **`CURRENT_STATUS.md`** (5 min) - System state, features, issues
+2. **`CLAUDE.md`** (10 min) - Complete project guide
+3. **Task-specific docs** as needed
+
+**Total onboarding: ~20 minutes**
 
 ## What This Is
 
@@ -17,24 +23,27 @@ Stores everything in Supabase for automated analysis and email reporting.
 
 **Not a dashboard app** - Just clean data + automated insights.
 
-## Key Files
+## Key Documentation
 
-- `START_HERE.md` - Current project status (READ THIS FIRST)
-- `CLAUDE.md` - Complete development guide
-- `SCHEMA_V2_README.md` - Database schema documentation
-- `schema_v2.sql` - Migration to run
-- `MCP_STATUS.md` - Supabase MCP setup
+- **`CURRENT_STATUS.md`** - System state (features, issues, data)
+- **`CLAUDE.md`** - Complete development guide
+- **`WEBHOOK_GUIDE.md`** - Webhook endpoints documentation
+- **`WEEKLY_REPORT_DEPLOYMENT.md`** - AI reporting system
+- **`HISTORICAL_DATA_MAPPING.md`** - Data migration guide
 
-## Current Schema (v2.0)
+## Current System (v2.2)
 
-Simple timestamp-based tracking:
-- Primary ID: `MC_ID` (Manychat ID)
-- Key timestamps: subscribe, qualified, link sent/clicked, form submit, meeting booked/held, purchase
-- Revenue tracking: Cumulative `purchase_amount`
-- AB testing: `chatbot_AB`, `MISC_AB`
-- Attribution: `AD_ID` for ROAS calculations
+**Live Features:**
+- 5 webhook endpoints (Stripe, GHL, ManyChat, Denefits, Perspective)
+- Meta Ads integration (38 ads tracked)
+- AI weekly reports (automated via OpenAI)
+- Historical data (537 contacts imported)
 
-If a timestamp exists, that event happened. No complex booleans.
+**Database:**
+- UUID primary keys
+- Flexible contact matching (MC_ID, GHL_ID, email)
+- Payment tracking with attribution
+- Meta ad creative analysis
 
 ## Development
 

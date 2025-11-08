@@ -247,6 +247,7 @@ function buildGHLUpdateData(eventType: string, body: any) {
     AD_ID: customData.AD_ID || customFields.AD_ID || null,
     thread_ID: customData.THREAD_ID || customFields.THREAD_ID || null,
     // Source logic: Use explicit source if provided, otherwise infer from MC_ID/AD_ID
+    // IMPORTANT: This overwrites 'instagram_historical' with live source when new events occur
     source: customData.source || ((customData.MC_ID || customFields.MC_ID || customData.AD_ID || customFields.AD_ID) ? 'instagram' : 'website'),
     updated_at: new Date().toISOString()
   };

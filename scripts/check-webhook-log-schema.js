@@ -1,51 +1,62 @@
-// Check the actual structure of webhook_logs
 const { createClient } = require('@supabase/supabase-js');
-const fs = require('fs');
-const path = require('path');
+require('dotenv').config({ path: '.env.local' });
 
-// Load .env.local manually
-const envPath = path.join(__dirname, '..', '.env.local');
-const envFile = fs.readFileSync(envPath, 'utf8');
-const envVars = {};
-envFile.split('\n').forEach(line => {
-  const [key, ...valueParts] = line.split('=');
-  if (key && valueParts.length > 0) {
-    envVars[key.trim()] = valueParts.join('=').trim();
-  }
-});
-
-const supabaseAdmin = createClient(
-  envVars.NEXT_PUBLIC_SUPABASE_URL,
-  envVars.SUPABASE_SERVICE_ROLE_KEY,
+const supabase = createClient(
+  process.env.NEXT_PUBLIC_SUPABASE_URL,
+  process.env.SUPABASE_SERVICE_ROLE_KEY,
   { auth: { persistSession: false } }
 );
 
-async function checkSchema() {
-  console.log('🔍 Checking webhook_logs structure...\n');
+async function checkWebhookLogs() {
+  console.log('🔍 Checking webhook_logs for Sophie payment...\n');
 
-  const { data: logs, error } = await supabaseAdmin
+  // Check for the specific session ID
+  const sessionId = 'cs_live_a1SC0bWy0gwaeG2HUe01W3RoMDk32wPlcYgZVfb13mulvUoEJh2D1ozEib';
+
+  const { data: allLogs, error: allLogsError } = await supabase
     .from('webhook_logs')
     .select('*')
-    .eq('event_type', 'checkout.session.completed')
-    .limit(1);
+    .eq('source', 'stripe')
+    .order('created_at', { ascending: false })
+    .limit(500);
 
-  if (error) {
-    console.error('❌ Error:', error);
+  if (allLogsError) {
+    console.error('❌ Error:', allLogsError);
     return;
   }
 
-  if (logs.length === 0) {
-    console.log('❌ No checkout.session.completed events found');
-    return;
+  console.log(`Total Stripe logs found: ${allLogs ? allLogs.length : 0}\n`);
+
+  const matchingLog = allLogs && allLogs.find(log => {
+    try {
+      const body = typeof log.body === 'string' ? JSON.parse(log.body) : log.body;
+      return body && body.data && body.data.object && body.data.object.id === sessionId;
+    } catch (e) {
+      return false;
+    }
+  });
+
+  if (matchingLog) {
+    console.log('✅ FOUND webhook log for this payment!\n');
+    console.log(`Event Type: ${matchingLog.event_type}`);
+    console.log(`Status: ${matchingLog.status}`);
+    console.log(`Error Message: ${matchingLog.error_message || 'none'}`);
+    console.log(`Created: ${matchingLog.created_at}\n`);
+    
+    // Parse the body to see what email it had
+    try {
+      const body = typeof matchingLog.body === 'string' ? JSON.parse(matchingLog.body) : matchingLog.body;
+      const email = body.data.object.customer_details.email;
+      console.log(`Email in webhook: ${email}`);
+    } catch (e) {
+      console.log('Could not extract email from body');
+    }
+  } else {
+    console.log('❌ NO webhook log found for this session ID');
+    console.log('This means:');
+    console.log('  - Webhook was NOT logged (failed before logging step)');
+    console.log('  - OR webhook never reached our endpoint');
   }
-
-  const log = logs[0];
-  console.log('📋 Webhook Log Columns:');
-  console.log(Object.keys(log).join(', '));
-  console.log('\n');
-
-  console.log('📄 Full Log Entry:');
-  console.log(JSON.stringify(log, null, 2));
 }
 
-checkSchema().catch(console.error);
+checkWebhookLogs().catch(console.error);

@@ -254,8 +254,9 @@ function buildUpdateData(eventType: string | null, manychatData: any) {
     trigger_word: customFields.trigger_word || customFields['All Tags'] || null,
     subscribed: manychatData.subscribed || null,
     ig_last_interaction: manychatData.ig_last_interaction || null,
-    // Source: Use custom field if provided, otherwise default to instagram (or instagram_lm if from lead magnet)
-    // Examples: 'instagram', 'instagram_lm', 'facebook', etc.
+    // Source: Use custom field if provided, otherwise default to instagram
+    // IMPORTANT: If contact had 'instagram_historical', overwrite it with new live source
+    // This ensures historical imports get updated to live sources when new events occur
     source: customFields.source || customFields.Source || 'instagram',
     updated_at: new Date().toISOString()
   };
