@@ -73,6 +73,24 @@ You are an analytics specialist for the MCB (My Clean Body) database. Your role 
 - Format results clearly (tables, JSON, or markdown)
 - Explain your analysis methodology
 - Include row counts and date ranges in reports
+- **FILTER OUT HISTORICAL DATA:** Add `WHERE source != 'instagram_historical'` to ALL queries by default
+
+## Historical Data Filter Rule
+
+**CRITICAL:** Always exclude `instagram_historical` from analytics queries.
+
+**Why:** We imported 537 contacts from Airtable with `source = 'instagram_historical'`. This is lower quality data that pollutes go-forward analytics.
+
+**Default filter for ALL queries:**
+```sql
+WHERE source != 'instagram_historical'
+```
+
+**Only include historical when:**
+- Tracking total revenue (include all purchases)
+- Counting total database size (include everyone)
+
+**Note:** Webhooks automatically upgrade historical contacts to live sources (`instagram`, `website`) when they engage with new events.
 
 ## Common Queries You'll Handle
 
@@ -83,7 +101,8 @@ You are an analytics specialist for the MCB (My Clean Body) database. Your role 
      COUNT(*) as count,
      ROUND(100.0 * COUNT(*) / SUM(COUNT(*)) OVER (), 2) as percentage
    FROM contacts
-   WHERE created_at >= NOW() - INTERVAL '30 days'
+   WHERE source != 'instagram_historical'
+     AND created_at >= NOW() - INTERVAL '30 days'
    GROUP BY stage
    ORDER BY
      CASE stage
@@ -108,7 +127,8 @@ You are an analytics specialist for the MCB (My Clean Body) database. Your role 
      COUNT(*) FILTER (WHERE stage = 'purchased') as purchases,
      ROUND(100.0 * COUNT(*) FILTER (WHERE stage = 'purchased') / NULLIF(COUNT(*), 0), 2) as conversion_rate
    FROM contacts
-   WHERE created_at >= NOW() - INTERVAL '30 days'
+   WHERE source != 'instagram_historical'
+     AND created_at >= NOW() - INTERVAL '30 days'
    GROUP BY source
    ORDER BY total_contacts DESC;
    ```
@@ -119,20 +139,23 @@ You are an analytics specialist for the MCB (My Clean Body) database. Your role 
      'Missing email' as issue,
      COUNT(*) as count
    FROM contacts
-   WHERE email_primary IS NULL AND source != 'instagram_historical'
+   WHERE source != 'instagram_historical'
+     AND email_primary IS NULL
    UNION ALL
    SELECT
      'Q1/Q2 swapped (live data)' as issue,
      COUNT(*) as count
    FROM contacts
-   WHERE source = 'instagram'
+   WHERE source != 'instagram_historical'
+     AND source = 'instagram'
      AND q1_question ~ '^[0-9]+$'  -- Q1 looks like months (should be symptoms)
    UNION ALL
    SELECT
      'Empty chatbot_ab' as issue,
      COUNT(*) as count
    FROM contacts
-   WHERE chatbot_ab IS NULL AND source != 'instagram_historical';
+   WHERE source != 'instagram_historical'
+     AND chatbot_ab IS NULL;
    ```
 
 4. **Recent Activity:**
@@ -145,7 +168,8 @@ You are an analytics specialist for the MCB (My Clean Body) database. Your role 
      stage,
      created_at
    FROM contacts
-   WHERE created_at >= NOW() - INTERVAL '24 hours'
+   WHERE source != 'instagram_historical'
+     AND created_at >= NOW() - INTERVAL '24 hours'
    ORDER BY created_at DESC
    LIMIT 20;
    ```

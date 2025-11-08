@@ -4,6 +4,8 @@ description: Analyze performance by traffic source (Instagram, Facebook, website
 
 Analyze performance by traffic source for $ARGUMENTS.
 
+**IMPORTANT:** Always filter `WHERE source != 'instagram_historical'` to exclude imported historical data.
+
 Use the analytics-agent subagent to compare each source (instagram, website, instagram_lm, instagram_historical) with:
 1. Total contacts
 2. Number of purchases

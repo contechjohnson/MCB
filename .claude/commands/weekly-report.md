@@ -4,6 +4,8 @@ description: Generate comprehensive weekly performance report with funnel metric
 
 Generate a comprehensive weekly report for $ARGUMENTS.
 
+**IMPORTANT:** Always filter `WHERE source != 'instagram_historical'` to exclude imported historical data from weekly analytics.
+
 Use the analytics-agent subagent to create a markdown report file with:
 
 ## Executive Summary

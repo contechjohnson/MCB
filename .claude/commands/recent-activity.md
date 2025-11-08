@@ -4,6 +4,8 @@ description: Display recent database activity and new contacts
 
 Show recent database activity with limit: $ARGUMENTS.
 
+**IMPORTANT:** Always filter `WHERE source != 'instagram_historical'` to exclude imported historical data.
+
 Use the analytics-agent subagent to display:
 1. New contacts in the last 24 hours
 2. Recent purchases

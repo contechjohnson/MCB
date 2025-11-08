@@ -12,11 +12,10 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ---
 
-### ⚠️ CRITICAL: ALWAYS CHECK THE DATE
+### ⚠️ CRITICAL RULES (Read Every Session!)
 
+#### 1. ALWAYS CHECK THE DATE
 **Current Date:** November 8, 2025 (NOT January!)
-
-**Common Error:** Claude sessions often misread the date as January 2025 due to confusion in documentation.
 
 **Before ANY date-based queries:**
 1. Check `<env>` for "Today's date"
@@ -24,10 +23,19 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 3. Calculate "last 30 days" from NOVEMBER, not January
 4. System went live in early November 2025
 
-**This affects:**
-- "Show me last 30 days" queries → Must use November 2025 as reference
-- Database queries with date filters → Use November 2025
-- Report generation → Weekly reports are from November 2025 onward
+#### 2. ALWAYS FILTER OUT HISTORICAL DATA
+**Default filter for ALL analytics queries:**
+```sql
+WHERE source != 'instagram_historical'
+```
+
+**Why:** We imported 537 contacts from Airtable with `source = 'instagram_historical'`. This is lower quality data that pollutes go-forward analytics.
+
+**Only include historical when:**
+- Tracking total revenue (include all purchases)
+- Counting total database size (include everyone)
+
+**Webhooks automatically upgrade:** When historical contacts engage (click link, book call, etc.), webhooks overwrite their source to `instagram` or `website`. They "graduate" to live data.
 
 ---
 
