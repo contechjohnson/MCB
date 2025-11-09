@@ -20,14 +20,9 @@
 
 import { NextRequest, NextResponse } from 'next/server';
 
-// Import report generation functions
-const { main: generateReport } = require('@/scripts/generate-weekly-report');
-const { generateWeeklyReportEmail } = require('@/lib/email-templates/weekly-report');
-const { sendWeeklyReport } = require('@/lib/email-sender');
-
 export async function GET(request: NextRequest) {
   console.log('\n🚀 Cron Job Triggered: Weekly Analytics Report');
-  console.log(`   Time: ${new Date().toLocaleString('en-US', { timeZone: 'America/Los_Angeles' })}`);
+  console.log(`   Time: ${new Date().toISOString()}`);
 
   try {
     // Verify cron secret (prevents unauthorized access)
@@ -42,91 +37,34 @@ export async function GET(request: NextRequest) {
       );
     }
 
-    // Check if recipient email is configured
-    const recipientEmail = process.env.REPORT_RECIPIENT_EMAIL;
-    if (!recipientEmail) {
-      console.error('❌ REPORT_RECIPIENT_EMAIL not configured');
-      return NextResponse.json(
-        { error: 'Recipient email not configured' },
-        { status: 500 }
-      );
-    }
+    // Call the weekly report endpoint with send=true
+    const baseUrl = process.env.VERCEL_URL
+      ? `https://${process.env.VERCEL_URL}`
+      : 'http://localhost:3000';
 
-    // Generate report data
-    console.log('\n📊 Generating weekly report...');
-    const { reportData, weekOverWeek, textReport, dateRange } = await generateReport();
+    console.log('📊 Generating weekly report...');
 
-    if (!reportData || !reportData.summary) {
-      console.error('❌ Failed to generate report data');
-      return NextResponse.json(
-        { error: 'Failed to generate report' },
-        { status: 500 }
-      );
-    }
-
-    console.log('✅ Report data generated successfully');
-
-    // Generate HTML email
-    console.log('\n📧 Generating HTML email...');
-    const htmlEmail = generateWeeklyReportEmail(reportData, weekOverWeek, dateRange);
-
-    if (!htmlEmail) {
-      console.error('❌ Failed to generate HTML email');
-      return NextResponse.json(
-        { error: 'Failed to generate email template' },
-        { status: 500 }
-      );
-    }
-
-    console.log('✅ HTML email generated');
-
-    // Format subject line with date range
-    const startDate = new Date(dateRange.start).toLocaleDateString('en-US', {
-      month: 'short',
-      day: 'numeric'
-    });
-    const endDate = new Date(dateRange.end).toLocaleDateString('en-US', {
-      month: 'short',
-      day: 'numeric',
-      year: 'numeric'
-    });
-    const subject = `📊 Weekly Analytics Report - ${startDate} to ${endDate}`;
-
-    // Send email
-    console.log('\n📮 Sending email...');
-    const emailResult = await sendWeeklyReport({
-      to: recipientEmail,
-      subject,
-      html: htmlEmail
+    const response = await fetch(`${baseUrl}/api/reports/weekly?send=true`, {
+      headers: {
+        'Content-Type': 'application/json',
+      },
     });
 
-    if (!emailResult.success) {
-      console.error('❌ Failed to send email:', emailResult);
-      return NextResponse.json(
-        { error: 'Failed to send email', details: emailResult },
-        { status: 500 }
-      );
+    if (!response.ok) {
+      const errorData = await response.json();
+      throw new Error(`Report generation failed: ${JSON.stringify(errorData)}`);
     }
 
-    console.log('✅ Email sent successfully!');
-    console.log(`   Email ID: ${emailResult.emailId}`);
+    const result = await response.json();
 
-    // Return success response
+    console.log('✅ Weekly report sent successfully');
+    console.log(`   Week Ending: ${result.week_ending}`);
+
     return NextResponse.json({
       success: true,
-      message: 'Weekly report generated and sent successfully',
-      dateRange: {
-        start: dateRange.start.toISOString(),
-        end: dateRange.end.toISOString()
-      },
-      summary: {
-        contacts: reportData.summary.total_contacts,
-        revenue: reportData.summary.total_revenue,
-        customers: reportData.summary.total_customers
-      },
-      emailId: emailResult.emailId,
-      recipient: recipientEmail,
-      timestamp: new Date().toISOString()
+      message: 'Weekly report generated and sent',
+      timestamp: new Date().toISOString(),
+      week_ending: result.week_ending
     });
 
   } catch (error) {
