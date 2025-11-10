@@ -54,7 +54,7 @@ export async function POST(request: NextRequest) {
     }
 
     // Extract webhook_type from root level (NOT in data.contract)
-    const webhookType = payload.webhook_type || payload.event_type || payload.type || 'unknown';
+    webhookType = payload.webhook_type || payload.event_type || payload.type || 'unknown';
 
     // Extract contract details from Denefits payload
     const contract = payload.data?.contract || payload;

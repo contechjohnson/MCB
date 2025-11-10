@@ -90,6 +90,10 @@ export async function POST(request: NextRequest) {
         await handleCheckoutExpired(event);
         break;
 
+      case 'charge.succeeded':
+        await handleChargeSucceeded(event);
+        break;
+
       case 'charge.refunded':
         await handleChargeRefunded(event);
         break;
@@ -118,7 +122,7 @@ export async function GET() {
     message: 'Stripe webhook endpoint is live',
     endpoints: {
       POST: 'Receives Stripe webhooks (requires signature)',
-      events: ['checkout.session.created', 'checkout.session.completed', 'checkout.session.expired', 'charge.refunded']
+      events: ['checkout.session.created', 'checkout.session.completed', 'checkout.session.expired', 'charge.succeeded', 'charge.refunded']
     }
   });
 }
@@ -248,6 +252,97 @@ async function handleCheckoutCompleted(event: Stripe.Event) {
   }
 
   console.log(`Payment recorded for contact ${contactId}: $${amount}`);
+}
+
+/**
+ * Handle charge succeeded (direct payment via Stripe Checkout)
+ * This is similar to checkout.session.completed but comes from charge events
+ */
+async function handleChargeSucceeded(event: Stripe.Event) {
+  const charge = event.data.object as Stripe.Charge;
+
+  const email = charge.billing_details?.email?.toLowerCase().trim() || charge.receipt_email?.toLowerCase().trim();
+  const amount = charge.amount ? charge.amount / 100 : 0; // Convert cents to dollars
+  const customerId = charge.customer as string;
+  const name = charge.billing_details?.name || '';
+  const phone = charge.billing_details?.phone || '';
+
+  if (!email) {
+    console.error('No email in charge.succeeded - logging payment without email');
+    // Still log the payment even without email
+    await supabaseAdmin.from('payments').insert({
+      contact_id: null,
+      payment_event_id: event.id,
+      payment_source: 'stripe',
+      payment_type: 'buy_in_full',
+      customer_name: name || null,
+      customer_phone: phone || null,
+      amount: amount,
+      currency: charge.currency || 'usd',
+      status: 'paid',
+      payment_date: new Date(event.created * 1000).toISOString(),
+      stripe_event_type: event.type,
+      stripe_customer_id: customerId || null,
+      stripe_session_id: null,
+      raw_payload: event
+    });
+    return;
+  }
+
+  // Find contact by email (checks all 3 email fields)
+  const { data: contactId } = await supabaseAdmin
+    .rpc('find_contact_by_email', { search_email: email });
+
+  // Log payment (works for both matched and orphan payments)
+  await supabaseAdmin.from('payments').insert({
+    contact_id: contactId || null,  // NULL = orphan
+    payment_event_id: event.id,
+    payment_source: 'stripe',
+    payment_type: 'buy_in_full',
+    customer_email: email,
+    customer_name: name || null,
+    customer_phone: phone || null,
+    amount: amount,
+    currency: charge.currency || 'usd',
+    status: 'paid',
+    payment_date: new Date(event.created * 1000).toISOString(),
+    stripe_event_type: event.type,
+    stripe_customer_id: customerId || null,
+    stripe_session_id: null,
+    raw_payload: event
+  });
+
+  if (!contactId) {
+    console.warn('No contact found for email:', email, '- Payment logged as orphan');
+    return;
+  }
+
+  // Update contact with purchase info (recalculate total from all payments)
+  const { data: totalPurchases } = await supabaseAdmin
+    .from('payments')
+    .select('amount')
+    .eq('contact_id', contactId)
+    .in('status', ['paid', 'active']);
+
+  const totalAmount = totalPurchases?.reduce((sum, p) => sum + Number(p.amount), 0) || amount;
+
+  const { error: updateError } = await supabaseAdmin
+    .rpc('update_contact_dynamic', {
+      contact_id: contactId,
+      update_data: {
+        email_payment: email,
+        stripe_customer_id: customerId,
+        purchase_date: new Date().toISOString(),
+        purchase_amount: totalAmount,  // Total from ALL payments
+        stage: 'purchased'
+      }
+    });
+
+  if (updateError) {
+    console.error('Error updating contact with purchase:', updateError);
+  }
+
+  console.log(`Payment recorded from charge.succeeded for contact ${contactId}: $${amount}`);
 }
 
 /**
