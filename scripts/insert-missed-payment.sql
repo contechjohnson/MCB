@@ -1,95 +1,103 @@
--- Insert missed payment from charge.succeeded event (Nov 9, 2025)
--- Run this in Supabase SQL Editor
+-- Insert Missed Stripe Payment
+-- Event ID: evt_3SRZFLCZF69l9Gkp0arGlxqB
+-- Email: thetarrynleethomas@gmail.com
+-- Amount: $1,196.00
+-- Date: 2025-11-09T09:17:28Z
 
--- Step 1: Find contact by email
-DO $$
-DECLARE
-  v_contact_id UUID;
-  v_total_amount NUMERIC;
-BEGIN
-  -- Find contact (will be NULL if not found)
-  SELECT find_contact_by_email('thetarrynleethomas@gmail.com') INTO v_contact_id;
+-- Step 1: Check if payment already exists
+SELECT * FROM payments
+WHERE payment_event_id = 'evt_3SRZFLCZF69l9Gkp0arGlxqB';
+-- Expected: No rows (if this returns a row, payment already exists)
 
-  IF v_contact_id IS NULL THEN
-    RAISE NOTICE 'No contact found for email thetarrynleethomas@gmail.com - creating orphan payment';
-  ELSE
-    RAISE NOTICE 'Contact found: %', v_contact_id;
-  END IF;
-
-  -- Insert payment
-  INSERT INTO payments (
-    contact_id,
-    payment_event_id,
-    payment_source,
-    payment_type,
-    customer_email,
-    customer_name,
-    customer_phone,
-    amount,
-    currency,
-    status,
-    payment_date,
-    stripe_event_type,
-    raw_payload
-  ) VALUES (
-    v_contact_id,
-    'evt_3SRZFLCZF69l9Gkp0arGlxqB',
-    'stripe',
-    'buy_in_full',
-    'thetarrynleethomas@gmail.com',
-    '',
-    '6029357075',
-    1196.00,
-    'usd',
-    'paid',
-    '2025-11-09T09:17:28Z'::TIMESTAMPTZ,
-    'charge.succeeded',
-    jsonb_build_object(
-      'id', 'evt_3SRZFLCZF69l9Gkp0arGlxqB',
-      'type', 'charge.succeeded',
-      'charge_id', 'ch_3SRZFLCZF69l9Gkp0CVayALS',
-      'amount', 119600,
-      'metadata', jsonb_build_object(
-        'package_id', '5',
-        'patient_id', '1420',
-        'package_name', 'Returning Mom - Paid in Full'
-      )
-    )
-  );
-
-  RAISE NOTICE 'Payment inserted successfully!';
-
-  -- If contact found, update their purchase info
-  IF v_contact_id IS NOT NULL THEN
-    -- Calculate total from all payments
-    SELECT COALESCE(SUM(amount), 0)
-    INTO v_total_amount
-    FROM payments
-    WHERE contact_id = v_contact_id
-      AND status IN ('paid', 'active');
-
-    -- Update contact
-    PERFORM update_contact_dynamic(
-      v_contact_id,
-      jsonb_build_object(
-        'email_payment', 'thetarrynleethomas@gmail.com',
-        'purchase_date', '2025-11-09T09:17:28Z',
-        'purchase_amount', v_total_amount,
-        'stage', 'purchased'
-      )
-    );
-
-    RAISE NOTICE 'Contact updated with purchase: $%', v_total_amount;
-  END IF;
-END $$;
-
--- Verify insertion
+-- Step 2: Find contact by email
 SELECT
   id,
+  mc_id,
+  ghl_id,
+  first_name,
+  last_name,
+  email_primary,
+  email_booking,
+  email_payment,
+  stage,
+  phone,
+  purchase_date,
+  purchase_amount
+FROM contacts
+WHERE email_primary ILIKE 'thetarrynleethomas@gmail.com'
+   OR email_booking ILIKE 'thetarrynleethomas@gmail.com'
+   OR email_payment ILIKE 'thetarrynleethomas@gmail.com';
+-- Expected: Should return the contact if exists
+-- Copy the 'id' value for use in Step 3
+
+-- Step 3: Insert payment record
+-- REPLACE 'CONTACT_ID_HERE' with the actual contact ID from Step 2
+-- Or use NULL if no contact was found
+INSERT INTO payments (
+  payment_source,
+  payment_type,
+  payment_event_id,
   contact_id,
   customer_email,
+  customer_phone,
   amount,
+  currency,
+  status,
   payment_date,
-  stripe_event_type
-FROM payments
-WHERE payment_event_id = 'evt_3SRZFLCZF69l9Gkp0arGlxqB';
+  stripe_event_type,
+  raw_payload
+) VALUES (
+  'stripe',
+  'buy_in_full',
+  'evt_3SRZFLCZF69l9Gkp0arGlxqB',
+  'CONTACT_ID_HERE', -- Replace with actual UUID or NULL
+  'thetarrynleethomas@gmail.com',
+  '6029357075',
+  1196.00,
+  'usd',
+  'succeeded',
+  '2025-11-09T09:17:28Z',
+  'charge.succeeded',
+  jsonb_build_object(
+    'event_id', 'evt_3SRZFLCZF69l9Gkp0arGlxqB',
+    'charge_id', 'ch_3SRZFLCZF69l9Gkp0CVayALS',
+    'package', 'Returning Mom - Paid in Full',
+    'note', 'Manually inserted from missed charge.succeeded event'
+  )
+)
+RETURNING *;
+
+-- Step 4: Update contact (only if contact was found in Step 2)
+-- REPLACE 'CONTACT_ID_HERE' with the actual contact ID
+UPDATE contacts
+SET
+  stage = 'purchased',
+  purchase_date = '2025-11-09T09:17:28Z',
+  purchase_amount = 1196.00,
+  phone = COALESCE(phone, '6029357075'), -- Only set if currently NULL
+  updated_at = NOW()
+WHERE id = 'CONTACT_ID_HERE'
+RETURNING
+  id,
+  first_name,
+  last_name,
+  email_primary,
+  stage,
+  purchase_date,
+  purchase_amount;
+
+-- Step 5: Verify insertion
+SELECT
+  p.id as payment_id,
+  p.payment_event_id,
+  p.amount,
+  p.status,
+  p.payment_date,
+  p.contact_id,
+  c.first_name,
+  c.last_name,
+  c.email_primary,
+  c.stage
+FROM payments p
+LEFT JOIN contacts c ON p.contact_id = c.id
+WHERE p.payment_event_id = 'evt_3SRZFLCZF69l9Gkp0arGlxqB';
