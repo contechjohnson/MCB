@@ -9,18 +9,20 @@ const supabaseAdmin = createClient(
 );
 
 /**
- * Denefits Webhook Handler
+ * Denefits Webhook Handler (via Make.com)
  *
- * Handles payment events from Denefits (Buy Now Pay Later):
- * - payment_approved: Customer approved for financing
- * - payment_plan_created: Payment plan created
- * - payment_received: Payment made on plan
- * - payment_completed: Full payment plan completed
+ * Handles webhooks from Denefits routed through Make.com:
+ * - contract.created: New BNPL contract created (customer financed)
+ * - contract.payments.recurring_payment: Monthly payment made
+ * - contract.status: Contract status changed (Active, Overdue, etc.)
  *
- * Strategy: Find contact by email, update purchase info
+ * Strategy:
+ * - contract.created: Create payment record, use date_added as purchase_date
+ * - recurring_payment: Log event, DON'T overwrite purchase_date/amount
+ * - contract.status: Log status change for tracking
  *
- * NOTE: Adjust this based on actual Denefits webhook payload
- * Check your Make.com scenario to see exact field names
+ * Make.com Endpoint: https://hook.us2.make.com/15fn280oj21071gnh2xls9f7ixvblu0u
+ * Secret Key: key_lmi8ohcoc9wdntg
  */
 export async function POST(request: NextRequest) {
   try {
@@ -74,12 +76,29 @@ export async function POST(request: NextRequest) {
     const numPayments = parseInt(contract.number_of_payments || 0);
     const remainingPayments = parseInt(contract.remaining_payments || numPayments);
 
+    // Contract created date (when they signed up for financing)
+    const contractCreatedDate = contract.date_added ? new Date(contract.date_added).toISOString() : new Date().toISOString();
+
     // Handle different webhook types
     if (webhookType === 'contract.payments.recurring_payment') {
-      // Recurring payment - don't create new payment record, just update contact
-      console.log(`Recurring payment for contract ${contractCode}, updating contact only`);
+      // Recurring payment - don't create new payment record
+      console.log(`Recurring payment for contract ${contractCode}`);
+      console.log(`  Amount: $${recurringAmount}, Remaining: ${remainingPayments} payments`);
+      // Just log it, don't update contact purchase info
+
+    } else if (webhookType === 'contract.status') {
+      // Contract status changed (Active, Overdue, Canceled, etc.)
+      const statusChange = payload.status_change || {};
+      console.log(`Contract status changed: ${contractCode}`);
+      console.log(`  Previous: ${statusChange.previous_status}, Current: ${statusChange.current_status}`);
+      console.log(`  Contract Status: ${contract.contract_status}`);
+      // Just log it for now, can add logic to update contact stage if needed
+
     } else if (webhookType === 'contract.created') {
-      // New contract - create payment record
+      // New contract created - create payment record
+      console.log(`Creating payment record for contract ${contractCode}`);
+      console.log(`  Amount: $${financedAmount}, Created: ${contractCreatedDate}`);
+
       await supabaseAdmin.from('payments').insert({
         contact_id: contactId || null,  // NULL = orphan
         payment_event_id: contractCode || `denefits_${contractId}`,
@@ -88,10 +107,10 @@ export async function POST(request: NextRequest) {
         customer_email: email,
         customer_name: `${contract.customer_first_name || ''} ${contract.customer_last_name || ''}`.trim() || null,
         customer_phone: contract.customer_mobile || null,
-        amount: financedAmount,
+        amount: financedAmount,  // FULL financed amount (not recurring amount)
         currency: 'usd',
         status: 'active',  // Denefits contracts are "active" vs "paid"
-        payment_date: contract.date_added ? new Date(contract.date_added).toISOString() : new Date().toISOString(),
+        payment_date: contractCreatedDate,  // Use contract creation date, NOT current date
         denefits_contract_id: contractId,
         denefits_contract_code: contractCode,
         denefits_financed_amount: financedAmount,
@@ -101,6 +120,9 @@ export async function POST(request: NextRequest) {
         denefits_remaining_payments: remainingPayments,
         raw_payload: body
       });
+    } else {
+      // Unknown webhook type - log it but don't process
+      console.log(`Unknown webhook type: ${webhookType} - logging only`);
     }
 
     if (!contactId) {
@@ -115,8 +137,8 @@ export async function POST(request: NextRequest) {
     }
 
     // Update contact with purchase info
-    // For recurring payments, only update if they don't already have purchase_date
-    // For new contracts, always set purchase info
+    // ONLY for contract.created - use contract's date_added as purchase_date
+    // For recurring payments or status changes, don't update purchase info
 
     // Check if contact already has purchase_date
     const { data: existingContact } = await supabaseAdmin
@@ -125,6 +147,7 @@ export async function POST(request: NextRequest) {
       .eq('id', contactId)
       .single();
 
+    // Only update for new contracts, OR if contact has no purchase_date yet
     const shouldUpdate = webhookType === 'contract.created' || !existingContact?.purchase_date;
 
     if (shouldUpdate) {
@@ -142,8 +165,8 @@ export async function POST(request: NextRequest) {
           contact_id: contactId,
           update_data: {
             email_payment: email,
-            purchase_date: existingContact?.purchase_date || new Date().toISOString(),
-            purchase_amount: totalAmount,  // Total from ALL payments
+            purchase_date: existingContact?.purchase_date || contractCreatedDate,  // Use contract creation date
+            purchase_amount: totalAmount,  // Total from ALL payments (Stripe + Denefits)
             stage: 'purchased'
           }
         });
@@ -159,8 +182,10 @@ export async function POST(request: NextRequest) {
         });
         return NextResponse.json({ error: updateError.message }, { status: 200 });
       }
+
+      console.log(`Updated contact ${contactId}: purchase_date=${contractCreatedDate}, amount=$${totalAmount}`);
     } else {
-      console.log(`Contact ${contactId} already has purchase_date, skipping update for recurring payment`);
+      console.log(`Skipping contact update - ${webhookType} event, already has purchase_date: ${existingContact?.purchase_date}`);
     }
 
     console.log(`Successfully processed Denefits ${webhookType} for ${email}`);
@@ -196,12 +221,18 @@ export async function POST(request: NextRequest) {
 export async function GET() {
   return NextResponse.json({
     status: 'ok',
-    message: 'Denefits webhook endpoint is live',
+    message: 'Denefits webhook endpoint is live (via Make.com)',
     endpoints: {
-      POST: 'Receives Denefits webhooks',
-      events: ['payment_approved', 'payment_plan_created', 'payment_received', 'payment_completed']
+      POST: 'Receives Denefits webhooks forwarded from Make.com',
+      makeComUrl: 'https://hook.us2.make.com/15fn280oj21071gnh2xls9f7ixvblu0u',
+      events: [
+        'contract.created - New contract created',
+        'contract.payments.recurring_payment - Monthly payment made',
+        'contract.status - Contract status changed'
+      ]
     },
-    note: 'Adjust event types based on actual Denefits webhook events'
+    routing: 'Denefits → Make.com → Vercel',
+    secretKey: 'key_lmi8ohcoc9wdntg'
   });
 }
 
