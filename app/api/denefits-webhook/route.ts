@@ -9,6 +9,36 @@ const supabaseAdmin = createClient(
 );
 
 /**
+ * Find contact by email with retry logic
+ * Handles race conditions where payment webhook arrives before ManyChat creates contact
+ * Retries: immediate, then 5s, then 15s
+ */
+async function findContactWithRetry(email: string, maxRetries = 3): Promise<string | null> {
+  const delays = [0, 5000, 15000]; // 0s, 5s, 15s
+
+  for (let i = 0; i < maxRetries; i++) {
+    // Wait before retry (skip first attempt)
+    if (delays[i] > 0) {
+      console.log(`  Retry ${i}: Waiting ${delays[i] / 1000}s before retrying contact lookup...`);
+      await new Promise(resolve => setTimeout(resolve, delays[i]));
+    }
+
+    const { data: contactId } = await supabaseAdmin
+      .rpc('find_contact_by_email', { search_email: email.toLowerCase().trim() });
+
+    if (contactId) {
+      if (i > 0) {
+        console.log(`  ✅ Contact found on retry ${i} after ${delays[i] / 1000}s delay`);
+      }
+      return contactId;
+    }
+  }
+
+  console.warn(`  ❌ Contact not found after ${maxRetries} attempts (total wait: 20s)`);
+  return null;
+}
+
+/**
  * Denefits Webhook Handler (via Make.com)
  *
  * Handles webhooks from Denefits routed through Make.com:
@@ -37,22 +67,6 @@ export async function POST(request: NextRequest) {
       timestamp: new Date().toISOString()
     });
 
-    // Extract webhook_type early for logging
-    let webhookType = 'unknown';
-    if (Array.isArray(body) && body.length > 0) {
-      webhookType = body[0].webhook_type || body[0].event_type || body[0].type || 'unknown';
-    } else {
-      webhookType = body.webhook_type || body.event_type || body.type || 'unknown';
-    }
-
-    // Log the webhook
-    await supabaseAdmin.from('webhook_logs').insert({
-      source: 'denefits',
-      event_type: webhookType,
-      payload: body,
-      status: 'received'
-    });
-
     // Handle array payload (Denefits sends array)
     let payload = body;
     if (Array.isArray(body) && body.length > 0) {
@@ -62,15 +76,24 @@ export async function POST(request: NextRequest) {
     // Extract webhook_type from root level (NOT in data.contract)
     const webhookType = payload.webhook_type || payload.event_type || payload.type || 'unknown';
 
+    // Log the webhook
+    await supabaseAdmin.from('webhook_logs').insert({
+      source: 'denefits',
+      event_type: webhookType,
+      payload: body,
+      status: 'received'
+    });
+
     // Extract contract details from Denefits payload
     const contract = payload.data?.contract || payload;
 
     // Extract email from nested structure
     const email = contract.customer_email || payload.customer_email || payload.email || payload.customer?.email;
 
-    // Find contact by email (checks all 3 email fields)
-    const { data: contactId } = await supabaseAdmin
-      .rpc('find_contact_by_email', { search_email: email.toLowerCase().trim() });
+    // Find contact by email with retry logic (handles race conditions)
+    // Retries: immediate, then 5s, then 15s - total 20s wait
+    console.log(`Looking up contact for email: ${email}`);
+    const contactId = await findContactWithRetry(email);
 
     const contractId = contract.contract_id;
     const contractCode = contract.contract_code;

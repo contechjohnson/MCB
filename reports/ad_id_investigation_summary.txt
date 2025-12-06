@@ -1,0 +1,120 @@
+AD_ID ATTRIBUTION GAP INVESTIGATION - EXECUTIVE SUMMARY
+Date: November 14, 2025
+Period: November 7-14, 2025
+
+========================================
+KEY FINDINGS
+========================================
+
+1. CAPTURE RATE: 39.6% (338 of 853 contacts have ad_id)
+   - Historical baseline: 35%
+   - Current: Slight improvement but still critical
+
+2. MISSING ATTRIBUTION BREAKDOWN:
+   - Instagram (no ad_id): 478 contacts, $8,790 revenue, 4 purchases
+   - Instagram (WITH ad_id): 335 contacts, $2,997 revenue, 1 purchase
+   - Website (no ad_id): 37 contacts, $8,244 revenue, 3 purchases
+   
+3. REVENUE WITHOUT ATTRIBUTION: $11,034 (78% of total purchases)
+   - Instagram no ad_id: $8,790 (4 purchases)
+   - Website: $8,244 (3 purchases)
+   
+4. DUPLICATE AD NAMES: 3 ads causing attribution confusion
+   - MC22 (VSLQ2 Video)
+   - MC39 (15mo Postpartum Carousel)
+   - MC31 (Still Exhausted Carousel)
+
+5. CPL DISCREPANCIES:
+   - Best: MC39 at $0.55 CPL (20 contacts, $10.92 spend)
+   - Worst: AG: MC62 at $43.18 CPL vs Meta's $10.53 (4.1x variance!)
+   - Meta reports 41 leads, we only captured 10 contacts (75% loss)
+
+========================================
+ROOT CAUSE ANALYSIS
+========================================
+
+PRIMARY: Organic Instagram Traffic (LIKELY)
+- 398 contacts have MC_ID but no ad_id
+- Chatbot variants A & B (Oct 30) affected equally
+- Likely organic profile clicks, story mentions, direct DMs
+
+SECONDARY: ManyChat Parameter Capture Issues (POSSIBLE)
+- 40% capture rate proves system CAN work
+- May be missing ad_id={{ad.id}} in some ad links
+- Trigger words mostly null (placeholder values)
+
+CONFIRMED: Website Traffic Working as Intended
+- 37 contacts without ad_id (expected for direct/SEO traffic)
+- High conversion rate (59% form submission)
+
+PARTIAL: BOF Funnel Working
+- 44 contacts with ad_id but no MC_ID
+- Attribution captured for direct-to-funnel traffic
+
+========================================
+IMMEDIATE ACTIONS REQUIRED
+========================================
+
+1. AUDIT MANYCHAT AD LINKS
+   - Check for ad_id={{ad.id}} parameter in all active ads
+   - Test end-to-end: ad click → ManyChat → webhook → database
+   
+2. ADD ORGANIC VS PAID TRACKING
+   - Use trigger_word to separate paid vs organic
+   - Add traffic_type custom field
+   
+3. FIX DUPLICATE AD NAMES
+   - Rename MC22, MC39, MC31 duplicates
+   - Add (v2), (v3) suffixes
+   
+4. INVESTIGATE AG: MC62
+   - 75% attribution loss (41 Meta leads vs 10 our contacts)
+   - Check landing page and tracking setup
+
+========================================
+MEDIUM-TERM IMPROVEMENTS
+========================================
+
+5. Align "contact" definition with Meta "lead" definition
+6. Automate weekly attribution health reports
+7. Track CPL variance alerts
+8. Add funnel stage to CPL calculations
+
+========================================
+LONG-TERM STRATEGY
+========================================
+
+9. Separate instagram_organic vs instagram_paid sources
+10. Build real-time attribution health dashboard
+11. Add profile_link, story_click source tracking
+
+========================================
+BUSINESS IMPACT
+========================================
+
+POSITIVE:
+- Organic Instagram traffic converting BETTER than paid (3x revenue)
+- Website traffic highly qualified (59% form submission rate)
+- System captures 40% of paid traffic (proves it works)
+
+NEGATIVE:
+- Cannot attribute $11K in revenue to specific ads
+- Cannot calculate true ROAS without organic separation
+- Some ads show 75% attribution loss
+
+PRIORITY: MEDIUM-HIGH
+- Not a broken system, but needs organic/paid separation
+- Revenue is being captured, just not attributed correctly
+- Fix will enable accurate ROAS and ad performance analysis
+
+========================================
+DATA QUALITY NOTES
+========================================
+
+- Total contacts (Nov 7-14): 853
+- Historical data excluded (source != 'instagram_historical')
+- All queries filtered by date range: >= 2025-11-07
+- Meta insights from last 7 days
+- CPL calculations use meta_ad_insights (weekly spend)
+
+Full report: /Users/connorjohnson/CLAUDE_CODE/MCB/reports/ad_id_investigation_2025-11-14.md

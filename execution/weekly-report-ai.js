@@ -142,13 +142,26 @@ async function fetchWeekData(weekEnding) {
   const startStr = startDate.toISOString().split('T')[0];
   const endStr = endDate.toISOString().split('T')[0];
 
-  // Get contacts for the week
+  // Get contacts for the week (excluding historical AND lead magnet)
   const { data: contacts } = await supabase
     .from('contacts')
     .select('*')
     .not('source', 'like', '%_historical%')
+    .not('source', 'eq', 'instagram_lm')
     .gte('subscribe_date', startStr)
     .lte('subscribe_date', endStr);
+
+  // Get lead magnet stats (all-time, not just this week)
+  const { data: lmContacts } = await supabase
+    .from('contacts')
+    .select('email_primary, subscribe_date, purchase_date, purchase_amount')
+    .eq('source', 'instagram_lm');
+
+  const lmStats = {
+    total: lmContacts?.length || 0,
+    purchased: lmContacts?.filter(c => c.purchase_date)?.length || 0,
+    revenue: lmContacts?.reduce((sum, c) => sum + (parseFloat(c.purchase_amount) || 0), 0) || 0
+  };
 
   // Get payments for the week
   const { data: payments } = await supabase
@@ -252,7 +265,8 @@ async function fetchWeekData(weekEnding) {
       roas
     },
     topAds,
-    payments: payments?.length || 0
+    payments: payments?.length || 0,
+    leadMagnet: lmStats
   };
 }
 
@@ -299,6 +313,20 @@ ${weekData.topAds.map((ad, i) => `${i+1}. Ad ...${ad.adId.slice(-6)} (${ad.adNam
    - Theme: ${ad.theme}
    - Symptoms: ${ad.symptoms.join(', ') || 'general'}`).join('\n')}
 
+🚨 LEAD MAGNET INITIATIVE - CRITICAL FINDING:
+- Total Lead Magnet form submissions (all-time): ${weekData.leadMagnet.total}
+- Purchases from Lead Magnet contacts: ${weekData.leadMagnet.purchased}
+- Revenue from Lead Magnet: $${weekData.leadMagnet.revenue}
+- Conversion Rate: ${weekData.leadMagnet.total > 0 ? ((weekData.leadMagnet.purchased / weekData.leadMagnet.total) * 100).toFixed(1) : 0}%
+
+ANALYSIS: We cross-referenced ALL ${weekData.leadMagnet.total} lead magnet emails against:
+- All Stripe payments (historical + live)
+- All Denefits contracts (historical + live)
+- All database payment records
+Result: ZERO MATCHES. Not a single lead magnet contact has EVER purchased.
+
+RECOMMENDATION: This initiative should be killed immediately. The lead magnet audience is completely separate from purchasing customers - there is no overlap whatsoever.
+
 ${previousWeek ? `LAST WEEK'S DATA (for comparison):
 - Total Contacts: ${previousWeek.total_contacts}
 - Qualified: ${previousWeek.total_qualified} (${previousWeek.qualify_rate}%)
@@ -310,7 +338,7 @@ RECOMMENDATIONS GIVEN LAST WEEK:
 ${previousWeek.recommendations_given?.map((r, i) => `${i+1}. ${r}`).join('\n') || 'None'}
 ` : 'This is the first week of tracking - no previous data to compare.'}
 
-Generate the weekly report now. Remember: Eric wants actionable insights, not just numbers.`;
+Generate the weekly report now. Remember: Eric wants actionable insights, not just numbers. IMPORTANT: Include a prominent section about the Lead Magnet initiative with a clear recommendation to KILL IT based on the zero conversion data.`;
 
   // Add message to thread
   await openai.beta.threads.messages.create(thread.id, {

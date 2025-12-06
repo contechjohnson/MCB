@@ -4,7 +4,7 @@ import Stripe from 'stripe';
 
 // Initialize Stripe
 const stripe = new Stripe(process.env.STRIPE_SECRET_KEY!, {
-  apiVersion: '2024-11-20.acacia'
+  apiVersion: '2025-08-27.basil' as any
 });
 
 // Admin client for bypassing RLS
@@ -13,6 +13,36 @@ const supabaseAdmin = createClient(
   process.env.SUPABASE_SERVICE_ROLE_KEY!,
   { auth: { persistSession: false } }
 );
+
+/**
+ * Find contact by email with retry logic
+ * Handles race conditions where payment webhook arrives before ManyChat creates contact
+ * Retries: immediate, then 5s, then 15s
+ */
+async function findContactWithRetry(email: string, maxRetries = 3): Promise<string | null> {
+  const delays = [0, 5000, 15000]; // 0s, 5s, 15s
+
+  for (let i = 0; i < maxRetries; i++) {
+    // Wait before retry (skip first attempt)
+    if (delays[i] > 0) {
+      console.log(`  Retry ${i}: Waiting ${delays[i] / 1000}s before retrying contact lookup...`);
+      await new Promise(resolve => setTimeout(resolve, delays[i]));
+    }
+
+    const { data: contactId } = await supabaseAdmin
+      .rpc('find_contact_by_email', { search_email: email.toLowerCase().trim() });
+
+    if (contactId) {
+      if (i > 0) {
+        console.log(`  ✅ Contact found on retry ${i} after ${delays[i] / 1000}s delay`);
+      }
+      return contactId;
+    }
+  }
+
+  console.warn(`  ❌ Contact not found after ${maxRetries} attempts (total wait: 20s)`);
+  return null;
+}
 
 /**
  * Stripe Webhook Handler
@@ -77,25 +107,17 @@ export async function POST(request: NextRequest) {
     }
 
     // Handle different event types
-    switch (event.type) {
-      case 'checkout.session.created':
-        await handleCheckoutCreated(event);
-        break;
-
-      case 'checkout.session.completed':
-        await handleCheckoutCompleted(event);
-        break;
-
-      case 'checkout.session.expired':
-        await handleCheckoutExpired(event);
-        break;
-
-      case 'charge.refunded':
-        await handleChargeRefunded(event);
-        break;
-
-      default:
-        console.log('Unhandled Stripe event type:', event.type);
+    const eventType = event.type as string;
+    if (eventType === 'checkout.session.created') {
+      await handleCheckoutCreated(event);
+    } else if (eventType === 'checkout.session.completed') {
+      await handleCheckoutCompleted(event);
+    } else if (eventType === 'checkout.session.expired') {
+      await handleCheckoutExpired(event);
+    } else if (eventType === 'charge.refunded') {
+      await handleChargeRefunded(event);
+    } else {
+      console.log('Unhandled Stripe event type:', event.type);
     }
 
     return NextResponse.json({ received: true }, { status: 200 });
@@ -194,13 +216,14 @@ async function handleCheckoutCompleted(event: Stripe.Event) {
     return;
   }
 
-  // Find contact by email (checks all 3 email fields)
-  const { data: contactId } = await supabaseAdmin
-    .rpc('find_contact_by_email', { search_email: email });
+  // Find contact by email with retry logic (handles race conditions)
+  // Retries: immediate, then 5s, then 15s - total 20s wait
+  console.log(`Looking up contact for email: ${email}`);
+  const contactId = await findContactWithRetry(email);
 
   // Log payment (works for both matched and orphan payments)
   await supabaseAdmin.from('payments').insert({
-    contact_id: contactId || null,  // NULL = orphan
+    contact_id: contactId || null,  // NULL = orphan (only after 3 retry attempts)
     payment_event_id: event.id,
     payment_source: 'stripe',
     payment_type: 'buy_in_full',

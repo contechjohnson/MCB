@@ -1,826 +1,210 @@
-# CLAUDE.md
+# MCB - Social Media Funnel Tracking Framework
 
-This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
+**What this is:** Multi-tenant funnel tracking for social media businesses.
 
-**Critical Documentation:** @CURRENT_STATUS.md @DATABASE_SCHEMA.md @HISTORICAL_DATA_FILTER_RULE.md
+**Active Tenants:** PPCU (Postpartum Care USA), Centner Wellness, Columnline AI
 
----
+**Tech Stack:** Next.js, Supabase, ManyChat, GoHighLevel, Stripe, Meta Ads
 
-## 🚨 CURRENT STATUS (Read This First!)
-
-**Last Updated:** November 8, 2025
-**System State:** 🟢 DEPLOYED & ACTIVE
 **Production URL:** https://mcb-dun.vercel.app/
 
 ---
 
-### ⚠️ CRITICAL RULES (Read Every Session!)
+## Quick Start
 
-#### 1. ALWAYS CHECK THE DATE
-**Current Date:** November 8, 2025 (NOT January!)
+```bash
+npm run dev                           # Start local server
+/db-status                            # Check database health
+/funnel ppcu last 30 days             # Analyze PPCU funnel
+node execution/sync-meta-ads.js       # Sync Meta Ads manually
+```
 
-**Before ANY date-based queries:**
-1. Check `<env>` for "Today's date"
-2. Verify it's November 2025
-3. Calculate "last 30 days" from NOVEMBER, not January
-4. System went live in early November 2025
+---
 
-#### 2. ALWAYS FILTER OUT HISTORICAL DATA
-**Default filter for ALL analytics queries:**
+## Directive Map (What Do I Run?)
+
+**Philosophy:** Read the directive first, then run the command.
+
+### Core Operations
+
+| I Want To... | Directive | Command |
+|--------------|-----------|---------|
+| Understand webhooks | `directives/webhooks.md` | (auto in production) |
+| Sync Meta Ads | `directives/meta-ads-sync.md` | `node execution/sync-meta-ads.js` |
+| Generate weekly report | `directives/weekly-reports.md` | `node execution/weekly-report-ai.js` |
+
+### Analytics
+
+| I Want To... | Directive | Command |
+|--------------|-----------|---------|
+| Analyze funnel | `directives/analytics.md` | `/funnel [tenant] [time]` |
+| Check data quality | `directives/analytics.md` | `/data-quality [tenant]` |
+| View recent activity | `directives/analytics.md` | `/recent-activity [tenant]` |
+| Source comparison | `directives/analytics.md` | `/source-performance [tenant]` |
+
+### Tenant Management
+
+| I Want To... | Directive | Command |
+|--------------|-----------|---------|
+| Add new tenant | `directives/multi-tenancy.md` | (coming soon) |
+| Configure integrations | `directives/multi-tenancy.md` | (coming soon) |
+
+### Debugging
+
+| I Want To... | Directive | Command |
+|--------------|-----------|---------|
+| Debug webhook | `directives/webhooks.md` | Check `webhook_logs` table |
+| Fix orphan payments | `directives/webhooks.md` | See troubleshooting section |
+| Understand historical filter | `directives/historical-data.md` | Always filter analytics |
+
+---
+
+## Critical Rules
+
+### 1. Always Check Today's Date
+Before any date-based query, verify the date in `<env>`. System went live November 2025.
+
+### 2. Always Filter Historical Data
 ```sql
 WHERE source != 'instagram_historical'
 ```
+537 imported contacts must be excluded from go-forward analytics. See `directives/historical-data.md`.
 
-**Why:** We imported 537 contacts from Airtable with `source = 'instagram_historical'`. This is lower quality data that pollutes go-forward analytics.
+### 3. Webhooks Always Return 200
+Even on errors. Prevents retry storms from external systems.
 
-**Only include historical when:**
-- Tracking total revenue (include all purchases)
-- Counting total database size (include everyone)
-
-**Webhooks automatically upgrade:** When historical contacts engage (click link, book call, etc.), webhooks overwrite their source to `instagram` or `website`. They "graduate" to live data.
-
----
-
-### ⚡ Quick Status
-
-**For detailed system status, feature status, known issues, and data metrics:**
-👉 **See `CURRENT_STATUS.md`** (single source of truth, updated weekly)
+### 4. Email Matching is Case-Insensitive
+Use `.ilike()` not `.eq()` when searching by email.
 
 ---
 
-### 🎯 What's Live Right Now
+## Directory Structure
 
-| System | Status | Details |
-|--------|--------|---------|
-| **Webhooks** | 🟢 LIVE | Stripe, GHL, ManyChat, Denefits, Perspective all active |
-| **Database** | 🟢 LIVE | 160+ contacts, receiving real-time data |
-| **Meta Ads Sync** | 🟢 LIVE | 38 ads tracked with creative data |
-| **AI Weekly Reports** | 🟢 LIVE | Automated reports every Friday 5:17 PM UTC |
-| **Historical Data** | 🟢 COMPLETE | 537 contacts imported from Airtable |
+```
+/MCB/
+├── CLAUDE.md                    # This file - entry point
+├── directives/                  # SOPs - Read before executing
+│   ├── webhooks.md              # All webhook handling
+│   ├── meta-ads-sync.md         # Meta Ads integration
+│   ├── weekly-reports.md        # AI report generation
+│   ├── analytics.md             # Query patterns
+│   └── historical-data.md       # Filter rules
+│
+├── execution/                   # Production scripts
+│   ├── sync-meta-ads.js
+│   ├── weekly-report-ai.js
+│   └── apply-migrations.js
+│
+├── app/api/                     # Webhook endpoints
+│   ├── webhooks/[tenant]/       # Multi-tenant (new)
+│   ├── manychat/                # Legacy
+│   ├── ghl-webhook/
+│   ├── stripe-webhook/
+│   └── cron/
+│
+├── scripts/                     # Organized scripts
+│   ├── production/              # Core scripts
+│   ├── analysis/                # Reusable analysis
+│   └── archive/                 # Historical investigations
+│
+├── migrations/                  # SQL migrations
+├── .claude/                     # AI agents & commands
+└── _archive/                    # Old code, investigations
+```
 
 ---
 
-### 🔴 Critical Issues (Active Investigation)
+## Directives
 
-- **MC→GHL Linkage: 7.9%** - Can't track full funnel (DM → Booking)
-- **Orphan Payments: 100%** - 2 payments ($5.5K) unlinked to contacts
-
-**For troubleshooting:** See `CURRENT_STATUS_REPORT.md`
-
----
-
-### 📚 Documentation Quick Start
-
-**New AI agents start here:**
-1. **CURRENT_STATUS.md** (5 min) ← System state, features, issues
-2. **This file (CLAUDE.md)** (10 min) ← Project guide, how to help user
-3. **SYSTEM_ARCHITECTURE.md** (5 min) ← System design *[if exists]*
-4. **Task-specific guides** as needed
-
-**Total onboarding: ~20 minutes**
+| Directive | Script | Purpose |
+|-----------|--------|---------|
+| `webhooks.md` | `app/api/webhooks/` | Receive events from 5 sources |
+| `meta-ads-sync.md` | `execution/sync-meta-ads.js` | Daily Meta Ads sync |
+| `weekly-reports.md` | `execution/weekly-report-ai.js` | AI-generated reports |
+| `analytics.md` | Slash commands | Funnel analysis, data quality |
+| `historical-data.md` | N/A | Filtering rules |
 
 ---
 
-### 🔗 Key Resources
+## Environment Variables
 
-- **System Status:** `CURRENT_STATUS.md` ← **Check this first**
-- **Webhooks:** `WEBHOOK_GUIDE.md`
-- **Weekly Reports:** `WEEKLY_REPORT_DEPLOYMENT.md`
-- **Meta Ads:** `META_ADS_INTEGRATION_GUIDE.md`
-- **Historical Data:** `HISTORICAL_DATA_MAPPING.md`
-- **Documentation Audit:** `DOCUMENTATION_AUDIT_REPORT.md`
+| Variable | Purpose | Per-Tenant? |
+|----------|---------|-------------|
+| `SUPABASE_*` | Database access | No (shared) |
+| `OPENAI_API_KEY` | AI reports | No (shared) |
+| `META_ACCESS_TOKEN` | Meta Ads API | Yes (in DB) |
+| `STRIPE_*` | Payment processing | Yes (in DB) |
+| `MANYCHAT_*` | DM automation | Yes (in DB) |
 
----
-
-## Project Overview
-
-MCB is a **data collection system** (not a dashboard app). It captures events from multiple sources (Stripe payments, GoHighLevel bookings, ManyChat conversations) and stores them in Supabase for automated reporting.
-
-**What this is FOR**: Collecting clean, queryable data and sending automated email reports
-**What this is NOT**: A web app with dashboards or UI that users will look at
-
-## How to Talk to the User
-
-The user is doing "vibe coding" - they understand the concepts but not all the technical details. When helping:
-- Explain things simply, like teaching a friend
-- Show the actual commands to run, don't just describe them
-- If something breaks, explain what went wrong in plain English
-- Don't assume deep knowledge of Next.js, databases, or TypeScript
-
-## Project Structure (Updated Nov 8, 2025)
-
-```
-/app
-  /api
-    /manychat/route.ts           # ManyChat webhook (DM qualified, link tracking)
-    /ghl-webhook/route.ts        # GoHighLevel webhook (bookings, meetings)
-    /stripe-webhook/route.ts     # Stripe webhook (payments, refunds)
-    /denefits-webhook/route.ts   # Denefits webhook (BNPL financing)
-    /perspective-webhook/route.ts # Perspective checkout abandonment
-    /reports/weekly-data/route.ts # Weekly analytics API
-    /cron/generate-report/route.ts # AI report generation (Fridays 5:17 PM)
-  layout.tsx
-  page.tsx
-
-/historical_data    # CSV files and Airtable exports (537 contacts imported)
-
-/scripts            # Production utilities and analysis scripts
-  sync-meta-ads.js         # Meta Ads daily sync
-  weekly-report-ai.js      # Generate AI reports
-  (47 total - see scripts/README.md for full index)
-
-/.claude            # Claude Code configuration
-  /agents           # Specialized subagents
-  /commands         # Custom slash commands
-  /skills           # Reusable skills
-
-/docs               # Setup guides and technical documentation
-  DEPLOYMENT_CHECKLIST.md    # Main deployment guide
-  WEBHOOK_GUIDE.md           # Technical webhook reference
-  SETUP_STRIPE.md            # Stripe webhook setup
-  SETUP_GHL.md               # GoHighLevel webhook setup
-  SETUP_MANYCHAT.md          # ManyChat webhook setup
-  SETUP_DENEFITS.md          # Denefits Make.com setup
-  WEBHOOK_GUIDE.md           # Technical reference
-  WEBHOOK_FLOW_DIAGRAM.md    # Visual flow diagrams
-
-/Schema Files
-  schema_v2.1.sql            # Current schema (UUID primary keys)
-
-.env.local        # Your secrets (not in git)
-package.json      # Dependencies (includes Stripe package)
-```
-
-## Development Commands
-
-```bash
-# Start the dev server (lets you test webhooks locally)
-npm run dev
-
-# Build for production
-npm run build
-
-# Check for errors (doesn't fix them, just finds them)
-npm run lint
-npm run type-check
-```
-
-## How This System Works
-
-### Customer Journey: Three Entry Points
-
-The system tracks customers through different entry points, each with different data collection:
-
-#### 🔵 **Path 1: Instagram DM Flow (Full Attribution)**
-```
-New Lead → DM Qualified → Link Sent → Link Clicked → Form Submitted →
-Meeting Held → Package Sent → Checkout Started → Purchased
-```
-
-**What we capture:**
-- `ad_id` - Meta Ads ID (from ManyChat parameters)
-- `mc_id` - ManyChat subscriber ID
-- `trigger_word` - heal, thrive, etc. (separates paid vs organic)
-- `chatbot_ab` - A/B test variant
-- Full conversation data (Q1, Q2, symptoms, objections)
-
-**Webhooks involved:** ManyChat → GHL → Stripe/Denefits
+For multi-tenant, credentials are stored in `tenant_integrations` table.
 
 ---
 
-#### 🟢 **Path 2: Website Traffic (Mid-Funnel Entry)**
-```
-[Skips: New Lead, DM Qualified, Link stages]
-Form Submitted → Meeting Held → Package Sent → Checkout Started → Purchased
-```
+## Slash Commands
 
-**What we capture:**
-- Email, phone, name from form
-- `source` = 'website'
-- **No** `ad_id` (no attribution)
-- **No** ManyChat data
-
-**Webhooks involved:** GHL → Stripe/Denefits
+| Command | Description |
+|---------|-------------|
+| `/funnel [tenant] [time]` | Conversion funnel analysis |
+| `/data-quality [tenant]` | Find missing fields, orphans |
+| `/source-performance [tenant]` | Compare Instagram vs website |
+| `/recent-activity [tenant] [time]` | New contacts/events |
+| `/db-status` | Database health check |
+| `/weekly-report [tenant]` | Generate full report |
+| `/web-analytics [query]` | Natural language queries |
 
 ---
 
-#### 🟡 **Path 3: Direct-to-Funnel (Bottom of Funnel)**
-```
-[Skips: New Lead, DM Qualified, Link stages]
-Form Submitted → Meeting Held → Package Sent → Checkout Started → Purchased
-```
+## Self-Annealing
 
-**What we capture:**
-- `ad_id` - Meta Ads ID (from ad click parameters)
-- `source` = 'instagram'
-- Email, phone, name from form
-- **No** ManyChat conversation data
+When something breaks:
+1. Fix the issue
+2. Update the directive's **Self-Annealing Log**
+3. Add prevention to the process
 
-**Webhooks involved:** GHL → Stripe/Denefits
+Directives are living SOPs. They evolve with the system.
 
 ---
 
-### ⚠️ Attribution Challenges
+## Quick Reference
 
-**Known Issues:**
-1. **Discount Links** - Owner sends discount links with no tracking → attribution lost
-2. **Meta Permissions Updates** - Break ManyChat attribution flow periodically → deflates `ad_id` capture
-3. **EHR Booking System** - Can't pixel actual bookings → only track "Meeting Held" via manual GHL form submission
-
-**Current Performance:**
-- AD_ID capture: ~35% (low due to organic traffic + Meta permission breaks)
-- MC→GHL linkage: ~7.9% (investigating email matching issues)
-
----
-
-### Stage Definitions
-
-| Stage | Description | How It's Set |
-|-------|-------------|--------------|
-| `new_lead` | Opted into ManyChat | ManyChat webhook (subscribe event) |
-| `dm_qualified` | Completed DM conversation | ManyChat webhook (qualification detected) |
-| `call_booked` | Submitted booking form | GHL webhook (form submission) |
-| `meeting_held` | Attended appointment | GHL webhook (manual team submission) |
-| `purchased` | Completed payment | Stripe or Denefits webhook |
-
-**Note:** Not all contacts go through all stages (depends on entry point).
+| Task | Directive | Quick Command |
+|------|-----------|---------------|
+| Check funnel | `analytics.md` | `/funnel ppcu` |
+| Debug webhook | `webhooks.md` | Query `webhook_logs` |
+| Sync ads | `meta-ads-sync.md` | `node execution/sync-meta-ads.js` |
+| Generate report | `weekly-reports.md` | `node execution/weekly-report-ai.js` |
+| Understand historical | `historical-data.md` | Filter `instagram_historical` |
 
 ---
 
-### The Five Main Webhooks
-
-**1. ManyChat Webhook** (`/api/manychat`)
-- Fires when: DM conversation, qualification, link clicks
-- Creates: Contact with `mc_id`, captures `ad_id`, trigger words, Q&A data
-- Stage transitions: new_lead → dm_qualified
-
-**2. GoHighLevel Webhook** (`/api/ghl-webhook`)
-- Fires when: Form submit, meeting held, package sent
-- Updates: Contact with `ghl_id`, links via email matching
-- Stage transitions: call_booked → meeting_held
-- **Critical:** Can't pixel EHR bookings, team manually submits "meeting held" form
-
-**3. Stripe Webhook** (`/api/stripe-webhook`)
-- Fires when: Payment success, refund, checkout expiration
-- Creates: Payment record, links to contact via email
-- Stage transition: → purchased (pay in full)
-- **Important**: Always returns 200 (prevents retry storms)
-
-**4. Denefits Webhook** (`/api/denefits-webhook`)
-- Fires when: BNPL financing approved/paid
-- Creates: Payment record (source = 'denefits')
-- Stage transition: → purchased (buy now pay later)
-- Routed via Make.com
-
-**5. Perspective Webhook** (`/api/perspective-webhook`)
-- Fires when: Checkout abandonment detected
-- Updates: Contact with `checkout_abandoned_date`
-- No stage change (tracks drop-off)
-
-## Supabase Database (Where the Data Lives)
-
-You have a PostgreSQL database hosted on Supabase. Think of it like a big Excel spreadsheet in the cloud that your code can write to.
-
-### Two Ways to Connect
-
-1. **From API routes**: Use the "admin" client (has full access, no restrictions)
-2. **From web pages**: Use the regular client (has security rules) - but you probably won't need this
-
-**In your code, always use the admin client**:
-```typescript
-import { createClient } from '@supabase/supabase-js';
-
-const supabaseAdmin = createClient(
-  process.env.NEXT_PUBLIC_SUPABASE_URL!,
-  process.env.SUPABASE_SERVICE_ROLE_KEY!,
-  { auth: { persistSession: false } }
-);
-```
-
-### Environment Variables (The Secrets)
-
-These live in `.env.local` (which doesn't get committed to git):
-
-```bash
-# Supabase
-NEXT_PUBLIC_SUPABASE_URL=https://your-project.supabase.co
-NEXT_PUBLIC_SUPABASE_ANON_KEY=eyJhbGc...  # Safe to expose in browser
-SUPABASE_SERVICE_ROLE_KEY=eyJhbGc...     # NEVER expose in browser, API routes only
-
-# Stripe
-STRIPE_SECRET_KEY=sk_live_...            # For reading Stripe data
-STRIPE_WEBHOOK_SECRET=whsec_...          # For verifying webhooks are real
-
-# GoHighLevel (if needed)
-GHL_API_KEY=...
-
-# ManyChat (if needed)
-MANYCHAT_VERIFY_TOKEN=...
-MANYCHAT_API_KEY=...
-```
-
-## Creating a New Webhook
-
-When you need to add a new webhook endpoint:
-
-1. **Create the file**: `app/api/[name]/route.ts`
-2. **Basic structure**:
-```typescript
-import { NextRequest, NextResponse } from 'next/server';
-import { createClient } from '@supabase/supabase-js';
-
-const supabaseAdmin = createClient(
-  process.env.NEXT_PUBLIC_SUPABASE_URL!,
-  process.env.SUPABASE_SERVICE_ROLE_KEY!,
-  { auth: { persistSession: false } }
-);
-
-export async function POST(request: NextRequest) {
-  try {
-    const body = await request.json();
-    console.log('Received webhook:', body);
-
-    // Do stuff with the data
-    await supabaseAdmin
-      .from('your_table')
-      .insert({ some_data: body.whatever });
-
-    // Always return 200 for webhooks
-    return NextResponse.json({ success: true }, { status: 200 });
-
-  } catch (error) {
-    console.error('Error:', error);
-    // Still return 200 to prevent retries
-    return NextResponse.json({ error: 'Internal error' }, { status: 200 });
-  }
-}
-
-// Add GET for testing
-export async function GET() {
-  return NextResponse.json({
-    status: 'ok',
-    message: 'Webhook is alive'
-  });
-}
-```
-
-3. **Test it locally**:
-   - Run `npm run dev`
-   - Visit `http://localhost:3000/api/[name]` (should see "ok" message)
-   - Test POST with curl or Postman
-
-4. **Deploy to production**: Just push to git, Vercel auto-deploys
-
-## Common Tasks
-
-### Check if webhook is working
-```bash
-# Test locally
-curl http://localhost:3000/api/stripe-webhook
-
-# Test production
-curl https://your-app.vercel.app/api/stripe-webhook
-```
-
-### Query the database (from code)
-```typescript
-// Get all contacts
-const { data, error } = await supabaseAdmin
-  .from('contacts')
-  .select('*');
-
-// Get contacts who paid
-const { data, error } = await supabaseAdmin
-  .from('contacts')
-  .select('*')
-  .eq('has_paid', true);
-
-// Count contacts
-const { count } = await supabaseAdmin
-  .from('contacts')
-  .select('*', { count: 'exact', head: true });
-```
-
-### Looking at webhook logs
-All webhook data gets logged to Supabase tables:
-- Check `stripe_webhook_logs` for Stripe events
-- Check `webhook_logs` for GHL/ManyChat events
-
-You can query these in the Supabase dashboard (SQL Editor).
-
-## Historical Data (CSVs & Airtable)
-
-Your old data lives in `/historical_data/` folder. This data CAN be migrated into Supabase to provide complete attribution.
-
-**For Historical Data Migration**:
-1. **READ FIRST**: See `HISTORICAL_DATA_MAPPING.md` for complete migration guide
-2. That guide explains:
-   - How to map old data to new database structure
-   - Stage progression rules (new_lead → dm_qualified → ... → purchased)
-   - Required vs optional fields
-   - Stage inference when timestamps are missing
-   - Common data source mappings (Airtable, Stripe, GHL, ManyChat)
-3. Most critical for attribution: `stage`, `purchase_date`, `purchase_amount`
-4. Always check for existing contacts before inserting (avoid duplicates)
-
-**Quick Migration Priority**:
-- ✅ Customers who purchased (stage = 'purchased')
-- ✅ Customers who attended meetings (stage = 'meeting_held')
-- ⏭️ Everyone else (as needed)
-
-## Archived Code
-
-Everything from the old version is in `/_archive_2025_11_02/`. You can:
-- Look at it for reference
-- Copy useful functions
-- But we're not maintaining it
-
-Claude will ignore this folder (it's in `.claudeignore`).
-
-## Deployment
-
-The app deploys to Vercel automatically:
-1. Push code to git (`git push origin main`)
-2. Vercel detects the push
-3. Runs `npm run build`
-4. Deploys to your URL (same URL, new code)
-
-No need to create a new project or change URLs.
-
-## Getting Help
-
-If something breaks:
-1. Check the Vercel deployment logs (in Vercel dashboard)
-2. Check the browser console (F12 in Chrome)
-3. Check Supabase logs (in Supabase dashboard → Logs)
-4. Ask Claude to help debug (describe what you expected vs what happened)
-
-## What's Next
-
-The immediate tasks are:
-1. ✅ Archive old code (done)
-2. 🔨 Create new clean folder structure
-3. 🔨 Set up basic API endpoints
-4. 🔨 Build the webhook handlers
-5. 🔨 Set up automated email reports
-6. 🔨 Test with real data
-
-## Tool & MCP Usage Guide
-
-### Web Scraping & Search - ALWAYS Use Firecrawl
-
-**Primary Tool: Firecrawl MCP** - This is your go-to for ANY web-related task.
-
-When you need to:
-- Search for documentation
-- Scrape a website
-- Look up package info (npm, GitHub, etc.)
-- Find examples or tutorials
-- Get any information from the web
-
-**Use Firecrawl MCP tools**:
-```typescript
-// For searching the web
-mcp__mcp-server-firecrawl__firecrawl_search
-
-// For scraping a specific page
-mcp__mcp-server-firecrawl__firecrawl_scrape
-
-// For discovering URLs on a site
-mcp__mcp-server-firecrawl__firecrawl_map
-```
-
-**DO NOT use**:
-- ❌ WebSearch (native tool) - Skip this entirely
-- ❌ WebFetch - Only use if Firecrawl fails
-- ❌ Puppeteer MCP - Firecrawl is faster and more reliable
-
-**Example scenarios**:
-- "Find Supabase documentation" → Use `firecrawl_search`
-- "Get the latest Next.js docs" → Use `firecrawl_scrape`
-- "Look up how to use Stripe webhooks" → Use `firecrawl_search`
-
-### Available MCP Servers
-
-This project has several MCP servers configured. Here's when to use each:
-
-**Firecrawl** - Web scraping and search (USE THIS FOR ALL WEB TASKS)
-- `firecrawl_search` - Search the web
-- `firecrawl_scrape` - Scrape a specific URL
-- `firecrawl_map` - Discover URLs on a website
-- `firecrawl_crawl` - Deep crawl a site
-- `firecrawl_extract` - Extract structured data
-
-**Filesystem** - File operations (already have Read/Write, but this adds more)
-- Use built-in Read/Write/Edit tools instead unless you need special filesystem features
-
-**Playwright** - Browser automation (rarely needed)
-- Only use if you need actual browser interaction
-- Firecrawl handles most scraping without needing a real browser
-
-**Memory** - Knowledge graph (not currently needed)
-- Skip for now unless building a knowledge base
-
-**Context7** - Library documentation (useful for package docs)
-- Use when you need up-to-date docs for a specific library
-- Example: Getting latest Stripe API docs
-
-**Notion** - Notion API integration (not currently used)
-- Skip unless integrating with Notion
-
-**Supabase MCP** - Direct database access (HIGHLY RECOMMENDED TO INSTALL)
-- Natural language database queries
-- Schema exploration
-- Quick data analysis
-- Table creation/modification
-- **Status**: Check `MCP_STATUS.md` for installation instructions
-- **Use for**: Development, testing, exploration (NOT production operations)
-- **Installation**: Add to Claude config, restart terminal
-
-### Database Operations
-
-**Two Ways to Work with Supabase:**
-
-**1. Via Supabase MCP (Recommended for exploration/testing)**
-- Ask in natural language: "Show me all contacts who purchased"
-- Automatic query generation and formatting
-- Great for quick analysis and debugging
-- See `MCP_STATUS.md` for setup
-
-**2. Via Code (Required for webhooks/production)**
-```typescript
-// ALWAYS create admin client in API routes
-const supabaseAdmin = createClient(
-  process.env.NEXT_PUBLIC_SUPABASE_URL!,
-  process.env.SUPABASE_SERVICE_ROLE_KEY!,
-  { auth: { persistSession: false } }
-);
-```
-
-**When to use which:**
-- 🔍 MCP: Exploring, analyzing, testing queries, schema changes
-- 💻 Code: Webhooks, automated processes, production endpoints
-
-**For testing connections**:
-- Create Node.js test scripts (see `test-supabase.js` example)
-- Run with `node test-supabase.js`
-
-### File Operations Priority
-
-1. **Read** - For reading files (use this, not `cat`)
-2. **Write** - For creating new files (use this, not `echo >`)
-3. **Edit** - For modifying existing files (use this, not `sed`)
-4. **Glob** - For finding files by pattern (use this, not `find`)
-5. **Grep** - For searching file contents (use this, not `grep` command)
-6. **Bash** - Only for actual shell commands (git, npm, node scripts)
-
-### Running Scripts
-
-**Node.js scripts**:
-```bash
-node your-script.js
-```
-
-**NPM commands**:
-```bash
-npm run dev
-npm run build
-npm install package-name
-```
-
-**Git operations** (if needed):
-```bash
-git add .
-git commit -m "message"
-git push origin main
-```
-
-### Task/Agent Tool
-
-Use the Task tool sparingly. Most operations should be done directly:
-- ❌ Don't use agents for simple file searches
-- ❌ Don't use agents for straightforward coding tasks
-- ✅ Do use agents for complex multi-step research
-- ✅ Do use agents when you need to coordinate multiple searches
-
-### Permissions
-
-All tools should work without prompts. If you're asked for permission:
-1. Check `.claude/settings.local.json`
-2. It should contain: `{"permissions": {"allow": ["*"], "deny": [], "ask": []}}`
-3. If it doesn't, update it and tell the user to restart their terminal
-
-## Custom Slash Commands & Specialized Agents
-
-### Available Slash Commands
-
-This project has custom commands for common analytics tasks. All use the `analytics-agent` subagent:
-
-| Command | Description | Usage |
-|---------|-------------|-------|
-| `/db-status` | Check database health and metrics | `/db-status` |
-| `/data-quality` | Run data quality checks | `/data-quality [source]` |
-| `/funnel` | Analyze conversion funnel | `/funnel [time-range]` |
-| `/source-performance` | Compare performance by source | `/source-performance [time-range]` |
-| `/recent-activity` | Show recent contacts/events | `/recent-activity [limit]` |
-| `/weekly-report` | Generate comprehensive report | `/weekly-report [time-range]` |
-| `/project-info` | Display project overview | `/project-info` |
-| `/web-analytics` | Web-optimized analytics (use for cloud instances) | `/web-analytics [query]` |
-
-**Example usage:**
-```
-/data-quality instagram
-/funnel last 30 days
-/weekly-report last 7 days
-/web-analytics show funnel for last 30 days
-```
-
-**⚠️ Important for Cloud Instances:**
-If you are running as a **Claude Code Web instance** (cloud environment), use `/web-analytics` instead of the other analytics commands. This command:
-- Uses the `analytics-agent-web` subagent (optimized for web MCP configuration)
-- Passes full results directly to terminal (no summarization)
-- Supports natural language queries
-- Works in cloud environments without local database access
-
-**Example web-analytics usage:**
-```
-/web-analytics show recent purchases
-/web-analytics what are the orphan payments
-/web-analytics MC to GHL linkage rate
-/web-analytics compare conversion by source
-```
-
-### Specialized Subagents
-
-| Agent | Purpose | When to Use |
-|-------|---------|-------------|
-| `analytics-agent` | Database queries & reporting | Data analysis, funnel metrics, quality checks |
-| `project-auditor` | Project cleanup & reusability | Audit project structure, identify unused files, make repeatable for new clients |
-| `supabase-expert` | Database design & optimization | Schema changes, migrations, complex queries |
-| `api-integrations` | External API webhooks | Webhook debugging, new integrations |
-| `manychat-webhook` | ManyChat-specific logic | ManyChat webhook issues |
-| `openai-assistant` | AI report generation | Weekly report automation |
-| `nextjs-setup` | Next.js configuration | App Router, API routes, deployment |
-| `supabase-setup` | Initial Supabase setup | New projects, configuration |
-
-**Note:** These are invoked automatically by Claude Code when relevant. You don't need to call them directly unless testing.
-
-**Project Auditor Usage:** Trigger with "audit the project", "clean up files", "what's unused", or "make this repeatable for other clients". Creates reports in `/audit` folder only.
+## User Communication Style
+
+The user does "vibe coding" - understands concepts but not all technical details:
+- Explain simply, like teaching a friend
+- Show actual commands to run
+- If something breaks, explain in plain English
+- Don't assume deep Next.js/TypeScript knowledge
 
 ---
 
-## Database Field Rules
+## MCP Tools
 
-### Two Subscribe Date Fields (CRITICAL!)
+**Primary:** Firecrawl for all web scraping/search
 
-We have TWO subscribe date fields in the contacts table:
+**Analytics:** Supabase MCP for natural language queries
 
-**1. `subscribed` (TIMESTAMPTZ) - THE SOURCE OF TRUTH**
-- From ManyChat API's raw data (`manychatData.subscribed`)
-- When they ACTUALLY subscribed to the chatbot (could be months/years ago)
-- Example: Sept 2024, April 2025
-- Used for: Time-based calculations, cohort analysis, actual customer journey
+**Reference:** Context7 for library documentation
 
-**2. `subscribe_date` (TIMESTAMPTZ) - When WE First Saw Them**
-- Set by webhook when our system first receives the contact (`new Date().toISOString()`)
-- When YOUR attribution system started tracking them (Nov 2025+)
-- Example: Nov 7, 2025
-- Used for: Data collection tracking, NOT customer journey
-
-**Why This Matters:**
-- Someone subscribed in Sept 2024 but clicked link Nov 7, 2025
-- They have `link_click_date` but no `link_send_date` ✅ **This is correct!**
-- We only started tracking sends on Nov 5, 2025
-- The send happened before we started tracking
-
-**Rules:**
-- Use `subscribed` for time-to-purchase, cohort analysis, customer lifecycle
-- Use `subscribe_date` for "when did we start tracking this person"
-- Don't be alarmed by NULL `link_send_date` for old subscribers
-- Analytics should prefer `subscribed` over `subscribe_date`
+See individual directives for tool-specific guidance.
 
 ---
 
-## Meta Ads Data Structure (CRITICAL!)
+## Related Documentation
 
-### How Meta Ads Sync Works
-
-We sync Meta Ads data **daily at 6am UTC** via cron job (`/api/cron/sync-meta-ads`).
-
-**Two data sets are fetched:**
-
-1. **Lifetime Performance** → Stored in `meta_ads` table
-   - Uses `date_preset=maximum` (all-time cumulative data)
-   - Shows total spend since ad was created
-   - Example: Ad created Aug 2023, shows $4,495 total spend
-   - Use for: Overall ROAS, total revenue attribution
-
-2. **Weekly Performance** → Stored in `meta_ad_insights` table
-   - Uses `date_preset=last_7d` (last 7 days only)
-   - Daily snapshots with `snapshot_date` column
-   - Example: Same ad shows $139.86 last 7 days
-   - Use for: "Best ad this week", weekly ROAS, trend analysis
-
-### Database Schema
-
-**meta_ads** (32 active ads)
-- `ad_id` (TEXT, unique) - Meta's ad ID
-- `ad_name` (TEXT) - Human-readable ad name
-- `spend` (NUMERIC) - **LIFETIME** total spend
-- `impressions`, `clicks`, `leads` (INT) - **LIFETIME** totals
-- `date_start`, `date_stop` (DATE) - Span of ad activity
-- `last_synced` (TIMESTAMPTZ) - When we last updated this row
-
-**meta_ad_insights** (daily snapshots)
-- `ad_id` (TEXT) - Links to meta_ads.ad_id
-- `snapshot_date` (DATE) - Date this snapshot represents
-- `spend` (NUMERIC) - **LAST 7 DAYS** spend
-- `impressions`, `clicks`, `leads` (INT) - **LAST 7 DAYS** totals
-- Constraint: UNIQUE(ad_id, snapshot_date)
-
-**meta_ad_creatives** (creative analysis)
-- `ad_id` (TEXT) - Links to meta_ads.ad_id
-- `primary_text`, `headline` - Ad copy
-- `transformation_theme` - Emotional angle (confusion→clarity, etc.)
-- `symptom_focus` (ARRAY) - Symptoms targeted (diastasis, pelvic_floor, etc.)
-- `media_type` - 'video' or 'image'
-
-### How to Calculate Weekly ROAS
-
-```sql
--- Get weekly ad spend (last 7 days)
-SELECT SUM(spend) as weekly_spend
-FROM meta_ad_insights
-WHERE snapshot_date >= CURRENT_DATE - 7;
-
--- Get weekly revenue (purchases in last 7 days, exclude historical)
-SELECT SUM(purchase_amount) as weekly_revenue
-FROM contacts
-WHERE purchase_date >= CURRENT_DATE - 7
-  AND source != 'instagram_historical';
-
--- Calculate weekly ROAS
-SELECT
-  SUM(purchase_amount) / NULLIF(SUM(spend), 0) as weekly_roas
-FROM contacts c
-LEFT JOIN meta_ad_insights mi ON mi.snapshot_date >= CURRENT_DATE - 7
-WHERE c.purchase_date >= CURRENT_DATE - 7
-  AND c.source != 'instagram_historical';
-```
-
-### How to Find "Best Ad This Week"
-
-```sql
--- Best performing ad by spend (last 7 days)
-SELECT
-  ma.ad_name,
-  mi.spend as weekly_spend,
-  mi.impressions,
-  mi.clicks,
-  ROUND((mi.clicks::numeric / NULLIF(mi.impressions, 0)) * 100, 2) as ctr
-FROM meta_ad_insights mi
-JOIN meta_ads ma ON mi.ad_id = ma.ad_id
-WHERE mi.snapshot_date = CURRENT_DATE
-ORDER BY mi.spend DESC
-LIMIT 1;
-
--- Best performing ad by CTR (last 7 days)
-ORDER BY (mi.clicks::numeric / NULLIF(mi.impressions, 0)) DESC
-LIMIT 1;
-```
-
-### Important Notes
-
-1. **Lifetime vs Weekly**: Always check which table you're querying
-   - `meta_ads.spend` = ALL-TIME cumulative
-   - `meta_ad_insights.spend` = LAST 7 DAYS only
-
-2. **Sync Schedule**: Script runs daily at 6am UTC (10pm PST / 11pm PDT)
-   - Manual sync: `node scripts/sync-meta-ads-enhanced.js`
-   - Dry run: `node scripts/sync-meta-ads-enhanced.js --dry-run`
-
-3. **Active Ads Only**: We only track ads with `effective_status = 'ACTIVE'`
-   - Currently tracking 32 active ads
-   - Paused/inactive ads are excluded from sync
-
-4. **Historical Data Filter**: When calculating ROAS, ALWAYS exclude historical contacts:
-   ```sql
-   WHERE source != 'instagram_historical'
-   ```
-
-5. **API Credentials Required**:
-   - `META_ACCESS_TOKEN` - Meta Graph API token
-   - `META_AD_ACCOUNT_ID` - Ad account ID (format: act_XXXXX)
-   - `META_API_VERSION` - Optional, defaults to v20.0
+- `CURRENT_STATUS.md` - System state, known issues
+- `DATABASE_SCHEMA.md` - Complete schema reference
+- `docs/` - Setup guides (archived)
 
 ---
 
-## Important Rules
-
-1. **Webhooks always return 200** - Even if there's an error, return success status to prevent infinite retries
-2. **Email matching is case-insensitive** - Use `.ilike()` not `.eq()` when searching by email
-3. **Log everything** - When in doubt, console.log() and save to a logs table
-4. **Keep it simple** - Don't over-engineer, just make it work
-5. **Data first** - Focus on collecting clean data, not building fancy UIs
-6. **Always use Firecrawl for web tasks** - Never use WebSearch, always use Firecrawl MCP
-7. **Never modify webhook code without explicit user request** - Webhooks are fragile and critical for attribution
+**For detailed information on any topic, read the appropriate directive first.**

@@ -1,0 +1,337 @@
+import { NextRequest, NextResponse } from 'next/server';
+import {
+  getTenantContext,
+  supabaseAdmin,
+  webhookError,
+  webhookSuccess,
+  logWebhook,
+} from '../../_shared/tenant-context';
+
+// ManyChat API base URL
+const MANYCHAT_API_URL = 'https://api.manychat.com/fb/subscriber';
+
+/**
+ * Multi-Tenant ManyChat Webhook Handler
+ *
+ * Route: POST /api/webhooks/[tenant]/manychat
+ * Example: POST /api/webhooks/ppcu/manychat
+ *
+ * Events:
+ * - contact_created: New subscriber
+ * - dm_qualified: Answered qualification questions
+ * - link_sent: Booking link sent
+ * - link_clicked: They clicked the booking link
+ */
+export async function POST(
+  request: NextRequest,
+  { params }: { params: { tenant: string } }
+) {
+  const tenantSlug = params.tenant;
+
+  try {
+    // Get tenant context
+    const tenant = await getTenantContext(tenantSlug);
+    if (!tenant) {
+      console.error('Unknown tenant:', tenantSlug);
+      return NextResponse.json({ error: 'Unknown tenant' }, { status: 404 });
+    }
+
+    let body = await request.json();
+
+    // Handle array payload (ManyChat sometimes sends array)
+    if (Array.isArray(body) && body.length > 0) {
+      body = body[0];
+    }
+
+    console.log(`[${tenantSlug}] ManyChat webhook received:`, {
+      hasSubscriber: !!body.subscriber,
+      hasSubscriberId: !!body.subscriber_id,
+      eventType: body.event_type,
+      timestamp: new Date().toISOString(),
+    });
+
+    // Extract data - handle both formats
+    let subscriberId: string | null = null;
+    let eventType: string | null = null;
+    let manychatData: any = null;
+
+    if (body.subscriber) {
+      subscriberId = body.subscriber.id;
+      manychatData = body.subscriber;
+
+      if (body.event_type) {
+        eventType = body.event_type;
+      } else {
+        const cf = body.subscriber.custom_fields || {};
+        if (cf.MCB_CLICKED_LINK) eventType = 'link_clicked';
+        else if (cf.MCB_SENT_LINK) eventType = 'link_sent';
+        else if (cf.MCB_LEAD_CONTACT) eventType = 'dm_qualified';
+        else if (cf.MCB_LEAD) eventType = 'contact_created';
+        else eventType = 'contact_update';
+      }
+    } else if (body.subscriber_id) {
+      subscriberId = body.subscriber_id;
+      eventType = body.event_type;
+    }
+
+    if (!subscriberId) {
+      return webhookError('Missing subscriber_id');
+    }
+
+    // Log webhook received
+    await logWebhook(supabaseAdmin, {
+      tenant_id: tenant.id,
+      source: 'manychat',
+      event_type: eventType || 'unknown',
+      payload: body,
+      mc_id: subscriberId,
+      status: 'received',
+    });
+
+    // Fetch full subscriber data from ManyChat API if not provided
+    if (!manychatData) {
+      const apiKey = tenant.credentials.manychat?.api_key || process.env.MANYCHAT_API_KEY;
+      manychatData = await fetchManyChatData(subscriberId, apiKey);
+
+      if (!manychatData) {
+        await logWebhook(supabaseAdmin, {
+          tenant_id: tenant.id,
+          source: 'manychat',
+          event_type: eventType || 'unknown',
+          payload: body,
+          mc_id: subscriberId,
+          status: 'error',
+          error_message: 'Failed to fetch data from ManyChat API',
+        });
+        return webhookError('Failed to fetch ManyChat data');
+      }
+    }
+
+    // Find or create contact (tenant-scoped)
+    const contactId = await findOrCreateContact(tenant.id, subscriberId);
+
+    // Build update data
+    const updateData = buildUpdateData(eventType, manychatData);
+
+    // Update contact
+    const { error: updateError } = await supabaseAdmin.rpc('update_contact_dynamic', {
+      contact_id: contactId,
+      update_data: updateData,
+    });
+
+    if (updateError) {
+      await logWebhook(supabaseAdmin, {
+        tenant_id: tenant.id,
+        source: 'manychat',
+        event_type: eventType || 'unknown',
+        payload: body,
+        mc_id: subscriberId,
+        status: 'error',
+        error_message: updateError.message,
+      });
+      return webhookError(updateError.message);
+    }
+
+    console.log(`[${tenantSlug}] Successfully processed ${eventType} for ${subscriberId}`);
+
+    // Log success
+    await logWebhook(supabaseAdmin, {
+      tenant_id: tenant.id,
+      source: 'manychat',
+      event_type: eventType || 'unknown',
+      payload: body,
+      mc_id: subscriberId,
+      contact_id: contactId,
+      status: 'processed',
+    });
+
+    return webhookSuccess({
+      contact_id: contactId,
+      event_type: eventType,
+      tenant: tenantSlug,
+    });
+  } catch (error) {
+    console.error(`[${tenantSlug}] ManyChat webhook error:`, error);
+    return webhookError(
+      'Internal server error',
+      error instanceof Error ? error.message : 'Unknown error'
+    );
+  }
+}
+
+/**
+ * GET handler for testing
+ */
+export async function GET(
+  request: NextRequest,
+  { params }: { params: { tenant: string } }
+) {
+  const tenant = await getTenantContext(params.tenant);
+  return NextResponse.json({
+    status: 'ok',
+    tenant: params.tenant,
+    tenant_name: tenant?.name || 'Unknown',
+    message: 'ManyChat webhook endpoint is live',
+    events: ['contact_created', 'dm_qualified', 'link_sent', 'link_clicked'],
+  });
+}
+
+/**
+ * Fetch full subscriber data from ManyChat API
+ */
+async function fetchManyChatData(subscriberId: string, apiKey: string | undefined) {
+  if (!apiKey) {
+    console.error('No ManyChat API key configured');
+    return null;
+  }
+
+  try {
+    const response = await fetch(
+      `${MANYCHAT_API_URL}/getInfo?subscriber_id=${subscriberId}`,
+      {
+        method: 'GET',
+        headers: {
+          Authorization: `Bearer ${apiKey}`,
+          'Content-Type': 'application/json',
+        },
+      }
+    );
+
+    if (!response.ok) {
+      console.error('ManyChat API error:', response.status, response.statusText);
+      return null;
+    }
+
+    const data = await response.json();
+    return data.data;
+  } catch (error) {
+    console.error('Error fetching ManyChat data:', error);
+    return null;
+  }
+}
+
+/**
+ * Find existing contact by MC_ID or create new one (tenant-scoped)
+ */
+async function findOrCreateContact(tenantId: string, subscriberId: string): Promise<string> {
+  // Try to find existing contact within tenant
+  const { data: existing } = await supabaseAdmin
+    .from('contacts')
+    .select('id')
+    .eq('tenant_id', tenantId)
+    .eq('mc_id', subscriberId)
+    .single();
+
+  if (existing) {
+    return existing.id;
+  }
+
+  // Create new contact
+  const { data: newContact, error } = await supabaseAdmin
+    .from('contacts')
+    .insert({
+      tenant_id: tenantId,
+      mc_id: subscriberId,
+      subscribe_date: new Date().toISOString(),
+      stage: 'new_lead',
+      source: 'instagram',
+    })
+    .select('id')
+    .single();
+
+  if (error) {
+    throw new Error(`Failed to create contact: ${error.message}`);
+  }
+
+  return newContact.id;
+}
+
+/**
+ * Build update data based on event type and ManyChat data
+ */
+function buildUpdateData(eventType: string | null, manychatData: any) {
+  const customFields = manychatData.custom_fields || {};
+
+  const baseData: any = {
+    first_name: manychatData.first_name || null,
+    last_name: manychatData.last_name || null,
+    email_primary:
+      manychatData.email ||
+      customFields['custom field email'] ||
+      customFields.MCB_SEARCH_EMAIL ||
+      null,
+    phone: manychatData.phone || manychatData.whatsapp_phone || null,
+    ig: manychatData.ig_username || manychatData.instagram_username || null,
+    ig_id: manychatData.ig_id || null,
+    fb: manychatData.name || null,
+    ad_id: customFields.AD_ID || customFields.ADID || null,
+    chatbot_ab: customFields.chatbot_AB || customFields['Chatbot AB Test'] || null,
+    thread_id: customFields.thread_id || customFields['Conversation ID'] || null,
+    trigger_word: customFields.trigger_word || customFields['All Tags'] || null,
+    subscribed: manychatData.subscribed || null,
+    ig_last_interaction: manychatData.ig_last_interaction || null,
+    source: customFields.source || customFields.Source || 'instagram',
+    updated_at: new Date().toISOString(),
+  };
+
+  const questionFields: any = {
+    q1_question: customFields.Symptoms || null,
+    q2_question: customFields['Months Postpartum'] || customFields['How Far Postpartum'] || null,
+    objections: customFields.Objections || null,
+  };
+
+  const dateFields: any = {};
+  if (customFields.DATE_LINK_SENT) dateFields.link_send_date = customFields.DATE_LINK_SENT;
+  if (customFields.DATE_LINK_CLICKED) dateFields.link_click_date = customFields.DATE_LINK_CLICKED;
+  if (customFields.DATE_FORM_FILLED) dateFields.form_submit_date = customFields.DATE_FORM_FILLED;
+  if (customFields.DATE_DM_QUALIFIED) dateFields.dm_qualified_date = customFields.DATE_DM_QUALIFIED;
+  if (customFields.DATE_MEETING_BOOKED) dateFields.appointment_date = customFields.DATE_MEETING_BOOKED;
+  if (customFields.DATE_MEETING_HELD) dateFields.appointment_held_date = customFields.DATE_MEETING_HELD;
+
+  switch (eventType) {
+    case 'contact_created':
+      return {
+        ...baseData,
+        ...questionFields,
+        ...dateFields,
+        subscribe_date: new Date().toISOString(),
+        stage: 'new_lead',
+      };
+
+    case 'dm_qualified':
+      return {
+        ...baseData,
+        ...questionFields,
+        ...dateFields,
+        lead_summary: customFields['Cody > Response'] || null,
+        dm_qualified_date: new Date().toISOString(),
+        stage: 'dm_qualified',
+      };
+
+    case 'link_sent':
+      return {
+        ...baseData,
+        ...questionFields,
+        ...dateFields,
+        link_send_date: new Date().toISOString(),
+        stage: 'landing_link_sent',
+      };
+
+    case 'link_clicked':
+      return {
+        ...baseData,
+        ...questionFields,
+        ...dateFields,
+        link_click_date: new Date().toISOString(),
+        stage: 'landing_link_clicked',
+      };
+
+    default:
+      return {
+        ...baseData,
+        ...questionFields,
+        ...dateFields,
+        lead_summary: customFields['Cody > Response'] || null,
+      };
+  }
+}

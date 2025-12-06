@@ -1,0 +1,354 @@
+import { NextRequest, NextResponse } from 'next/server';
+import {
+  getTenantContext,
+  supabaseAdmin,
+  webhookError,
+  webhookSuccess,
+  logWebhook,
+} from '../../_shared/tenant-context';
+
+/**
+ * Multi-Tenant GoHighLevel Webhook Handler
+ *
+ * Route: POST /api/webhooks/[tenant]/ghl
+ * Example: POST /api/webhooks/ppcu/ghl
+ *
+ * Events:
+ * - OpportunityCreate: New booking/opportunity
+ * - MeetingCompleted: Meeting attended
+ * - PackageSent: Treatment package sent
+ * - ContactUpdate: Contact info updated
+ */
+export async function POST(
+  request: NextRequest,
+  { params }: { params: { tenant: string } }
+) {
+  const tenantSlug = params.tenant;
+
+  try {
+    // Get tenant context
+    const tenant = await getTenantContext(tenantSlug);
+    if (!tenant) {
+      console.error('Unknown tenant:', tenantSlug);
+      return NextResponse.json({ error: 'Unknown tenant' }, { status: 404 });
+    }
+
+    let body = await request.json();
+
+    // Handle array payload
+    if (Array.isArray(body) && body.length > 0) {
+      body = body[0];
+    }
+
+    console.log(`[${tenantSlug}] GHL webhook received:`, {
+      hasContactId: !!body.contact_id,
+      hasOpportunity: !!body.opportunity_name,
+      pipelineStage: body.pipleline_stage || body.pipeline_stage,
+      timestamp: new Date().toISOString(),
+    });
+
+    // Extract data from webhook
+    const customData = body.customData || {};
+    const ghlContactId = customData.contact_id || body.contact_id;
+    const eventType = customData.event_type || body.type || determineEventTypeFromStage(body);
+    const email = (body.email || customData.email)?.toLowerCase().trim();
+    const phone = normalizePhone(customData.phone || body.phone);
+
+    if (!ghlContactId) {
+      return webhookError('Missing contact_id');
+    }
+
+    // Log webhook received
+    await logWebhook(supabaseAdmin, {
+      tenant_id: tenant.id,
+      source: 'ghl',
+      event_type: eventType,
+      payload: body,
+      ghl_id: ghlContactId,
+      status: 'received',
+    });
+
+    // Find or create contact (tenant-scoped)
+    const contactId = await findOrCreateContactGHL(tenant.id, {
+      ghlId: ghlContactId,
+      mcId: customData.MC_ID || undefined,
+      email: email,
+      phone: phone || undefined,
+      firstName: customData.first_name || body.first_name,
+      lastName: customData.last_name || body.last_name,
+      source: customData.source || undefined,
+    });
+
+    // Build update data based on event
+    const updateData = buildGHLUpdateData(eventType, body);
+
+    // Update contact
+    const { error: updateError } = await supabaseAdmin.rpc('update_contact_dynamic', {
+      contact_id: contactId,
+      update_data: updateData,
+    });
+
+    if (updateError) {
+      await logWebhook(supabaseAdmin, {
+        tenant_id: tenant.id,
+        source: 'ghl',
+        event_type: eventType,
+        payload: body,
+        ghl_id: ghlContactId,
+        status: 'error',
+        error_message: updateError.message,
+      });
+      return webhookError(updateError.message);
+    }
+
+    console.log(`[${tenantSlug}] Successfully processed ${eventType} for GHL contact ${ghlContactId}`);
+
+    // Log success
+    await logWebhook(supabaseAdmin, {
+      tenant_id: tenant.id,
+      source: 'ghl',
+      event_type: eventType,
+      payload: body,
+      ghl_id: ghlContactId,
+      contact_id: contactId,
+      status: 'processed',
+    });
+
+    return webhookSuccess({
+      contact_id: contactId,
+      event_type: eventType,
+      tenant: tenantSlug,
+    });
+  } catch (error) {
+    console.error(`[${tenantSlug}] GHL webhook error:`, error);
+    return webhookError(
+      'Internal server error',
+      error instanceof Error ? error.message : 'Unknown error'
+    );
+  }
+}
+
+/**
+ * GET handler for testing
+ */
+export async function GET(
+  request: NextRequest,
+  { params }: { params: { tenant: string } }
+) {
+  const tenant = await getTenantContext(params.tenant);
+  return NextResponse.json({
+    status: 'ok',
+    tenant: params.tenant,
+    tenant_name: tenant?.name || 'Unknown',
+    message: 'GoHighLevel webhook endpoint is live',
+    events: ['OpportunityCreate', 'MeetingCompleted', 'PackageSent', 'ContactUpdate'],
+  });
+}
+
+/**
+ * Find existing contact or create new one (tenant-scoped)
+ */
+async function findOrCreateContactGHL(
+  tenantId: string,
+  data: {
+    ghlId: string;
+    mcId?: string | null;
+    email?: string;
+    phone?: string;
+    firstName?: string;
+    lastName?: string;
+    source?: string | null;
+  }
+): Promise<string> {
+  // Try to find by GHL ID within tenant
+  const { data: existingByGhl } = await supabaseAdmin
+    .from('contacts')
+    .select('id')
+    .eq('tenant_id', tenantId)
+    .eq('ghl_id', data.ghlId)
+    .single();
+
+  if (existingByGhl) {
+    return existingByGhl.id;
+  }
+
+  // Try to find by MC ID within tenant (if provided)
+  if (data.mcId) {
+    const { data: existingByMc } = await supabaseAdmin
+      .from('contacts')
+      .select('id')
+      .eq('tenant_id', tenantId)
+      .eq('mc_id', data.mcId)
+      .single();
+
+    if (existingByMc) {
+      // Link GHL ID to existing ManyChat contact
+      await supabaseAdmin.rpc('update_contact_dynamic', {
+        contact_id: existingByMc.id,
+        update_data: { ghl_id: data.ghlId },
+      });
+      return existingByMc.id;
+    }
+  }
+
+  // Try to find by email within tenant
+  if (data.email) {
+    const { data: existingByEmail } = await supabaseAdmin
+      .from('contacts')
+      .select('id')
+      .eq('tenant_id', tenantId)
+      .ilike('email_primary', data.email)
+      .single();
+
+    if (existingByEmail) {
+      // Link GHL ID to existing contact
+      await supabaseAdmin.rpc('update_contact_dynamic', {
+        contact_id: existingByEmail.id,
+        update_data: { ghl_id: data.ghlId },
+      });
+      return existingByEmail.id;
+    }
+  }
+
+  // Create new contact
+  const { data: newContact, error } = await supabaseAdmin
+    .from('contacts')
+    .insert({
+      tenant_id: tenantId,
+      ghl_id: data.ghlId,
+      email_primary: data.email || null,
+      phone: data.phone || null,
+      first_name: data.firstName || null,
+      last_name: data.lastName || null,
+      stage: 'form_submitted',
+      source: data.source || 'website',
+    })
+    .select('id')
+    .single();
+
+  if (error) {
+    throw new Error(`Failed to create contact: ${error.message}`);
+  }
+
+  return newContact.id;
+}
+
+/**
+ * Determine event type from GHL pipeline stage
+ */
+function determineEventTypeFromStage(body: any): string {
+  const customData = body.customData || {};
+  const customStage = (customData.pipeline_stage || '').toLowerCase();
+  const ghlStage = (body.pipleline_stage || body.pipeline_stage || '').toLowerCase();
+
+  if (customStage === 'form_filled' || customStage === 'meeting_booked') {
+    return 'OpportunityCreate';
+  }
+  if (customStage === 'meeting_attended') {
+    return 'MeetingCompleted';
+  }
+  if (customStage === 'package_sent') {
+    return 'PackageSent';
+  }
+
+  if (ghlStage.includes('scheduled') || ghlStage.includes('booked')) {
+    return 'OpportunityCreate';
+  }
+  if (ghlStage.includes('completed') || ghlStage.includes('attended')) {
+    return 'MeetingCompleted';
+  }
+  if (ghlStage.includes('package') || ghlStage.includes('sent')) {
+    return 'PackageSent';
+  }
+
+  return 'ContactUpdate';
+}
+
+/**
+ * Build update data based on GHL event type
+ */
+function buildGHLUpdateData(eventType: string, body: any) {
+  const customData = body.customData || {};
+  const customFields = body;
+
+  const baseData: any = {
+    email_booking: (body.email || customData.email)?.toLowerCase().trim() || null,
+    phone: normalizePhone(customData.phone || body.phone) || null,
+    first_name: customData.first_name || body.first_name || null,
+    last_name: customData.last_name || body.last_name || null,
+    mc_id: customData.MC_ID || customFields.MC_ID || null,
+    ad_id: customData.AD_ID || customFields.AD_ID || null,
+    thread_id: customData.THREAD_ID || customFields.THREAD_ID || null,
+    source:
+      customData.source ||
+      (customData.MC_ID || customFields.MC_ID || customData.AD_ID || customFields.AD_ID
+        ? 'instagram'
+        : 'website'),
+    updated_at: new Date().toISOString(),
+  };
+
+  const stage = (customData.pipeline_stage || body.pipleline_stage || body.pipeline_stage || '').toLowerCase();
+  const appointmentTime = body['Discovery Call Time (EST)'] || body.appointment_start_time;
+
+  if (eventType === 'OpportunityCreate' || eventType.includes('Opportunity')) {
+    if (stage === 'form_filled') {
+      return { ...baseData, form_submit_date: new Date().toISOString(), stage: 'form_submitted' };
+    }
+    if (stage === 'meeting_booked') {
+      return {
+        ...baseData,
+        stage: 'meeting_booked',
+        appointment_date: appointmentTime ? new Date(appointmentTime).toISOString() : new Date().toISOString(),
+      };
+    }
+    if (stage === 'meeting_attended') {
+      return { ...baseData, appointment_held_date: new Date().toISOString(), stage: 'meeting_held' };
+    }
+    if (stage === 'package_sent') {
+      return { ...baseData, package_sent_date: new Date().toISOString(), stage: 'package_sent' };
+    }
+
+    // Fallback
+    const opportunityData: any = { ...baseData, form_submit_date: new Date().toISOString() };
+    if (stage.includes('scheduled') || stage.includes('booked') || appointmentTime) {
+      opportunityData.appointment_date = appointmentTime
+        ? new Date(appointmentTime).toISOString()
+        : new Date().toISOString();
+      opportunityData.stage = 'meeting_booked';
+    }
+    if (stage.includes('completed') || stage.includes('attended') || stage.includes('show')) {
+      opportunityData.appointment_held_date = new Date().toISOString();
+      opportunityData.stage = 'meeting_held';
+    }
+    if (stage.includes('package') || stage.includes('sent')) {
+      opportunityData.package_sent_date = new Date().toISOString();
+      opportunityData.stage = 'package_sent';
+    }
+    return opportunityData;
+  }
+
+  if (eventType === 'MeetingCompleted') {
+    return { ...baseData, appointment_held_date: new Date().toISOString(), stage: 'meeting_held' };
+  }
+
+  if (eventType === 'PackageSent') {
+    return { ...baseData, package_sent_date: new Date().toISOString(), stage: 'package_sent' };
+  }
+
+  if (eventType === 'ContactCreate' || eventType === 'ContactUpdate') {
+    return { ...baseData, stage: 'form_submitted' };
+  }
+
+  return baseData;
+}
+
+/**
+ * Normalize phone number
+ */
+function normalizePhone(phone?: string): string | null {
+  if (!phone) return null;
+  const digits = phone.replace(/\D/g, '');
+  if (digits.length === 10) return `+1${digits}`;
+  if (digits.length === 11 && digits.startsWith('1')) return `+${digits}`;
+  return digits.length > 0 ? `+${digits}` : null;
+}

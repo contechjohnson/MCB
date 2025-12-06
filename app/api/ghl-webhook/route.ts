@@ -61,12 +61,12 @@ export async function POST(request: NextRequest) {
     // Find or create contact using smart matching
     const contactId = await findOrCreateContactGHL({
       ghlId: ghlContactId,
-      mcId: customData.MC_ID || null,  // Include MC_ID for matching
+      mcId: customData.MC_ID || undefined,  // Include MC_ID for matching
       email: email,
-      phone: phone,
+      phone: phone || undefined,
       firstName: customData.first_name || body.first_name,
       lastName: customData.last_name || body.last_name,
-      source: customData.source || null
+      source: customData.source || undefined
     });
 
     // Build update data based on event
