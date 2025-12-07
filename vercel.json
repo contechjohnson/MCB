@@ -19,14 +19,6 @@
     {
       "path": "/api/cron/weekly-report",
       "schedule": "0 22 * * 4"
-    },
-    {
-      "path": "/api/cron/monthly-report",
-      "schedule": "0 14 1 * *"
-    },
-    {
-      "path": "/api/cron/sync-meta-ads",
-      "schedule": "0 6 * * *"
     }
   ]
 }
