@@ -85,7 +85,9 @@ async function fetchTopAds(startDate: string, endDate: string) {
   const topAds = [];
   for (const [adId, count] of sorted) {
     const { data: ad } = await supabase.from('meta_ads').select('ad_name').eq('ad_id', adId).single();
-    topAds.push({ ad_name: ad?.ad_name || `Ad ${adId}`, leads: count });
+    let name = ad?.ad_name || `Ad ${adId}`;
+    if (name.length > 40) name = name.substring(0, 37) + '...';
+    topAds.push({ ad_name: name, leads: count });
   }
   return topAds;
 }
