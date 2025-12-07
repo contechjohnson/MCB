@@ -12,7 +12,7 @@
   "dependencies": {
     "@supabase/supabase-js": "^2.54.0",
     "dotenv": "^17.2.3",
-    "next": "15.4.6",
+    "next": "^16.0.7",
     "nodemailer": "^7.0.10",
     "openai": "^6.8.1",
     "papaparse": "^5.5.3",
