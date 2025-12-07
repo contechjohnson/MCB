@@ -179,7 +179,7 @@ export async function GET(request: Request) {
     const filename = `PPCU_Weekly_Data_${week.start}_to_${week.end}.csv`;
 
     const { error } = await resend.emails.send({
-      from: 'Clara Analytics <onboarding@resend.dev>',
+      from: process.env.RESEND_FROM_EMAIL || 'Clara Analytics <reports@postpartumcareusa.com>',
       to: REPORT_RECIPIENTS,
       subject: `PPCU Weekly: ${week.label} - $${activity.revenue.toLocaleString()} Revenue`,
       attachments: [
