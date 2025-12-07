@@ -58,71 +58,85 @@ export async function GET(request: NextRequest) {
       );
     }
 
-    // Sync weekly insights (last 7 days) for weekly reporting
-    console.log('\n📊 Fetching weekly insights (last 7 days)...');
+    // Fetch both 7-day and 28-day insights
+    console.log('\n📊 Fetching 7-day insights...');
+    const url7d = `https://graph.facebook.com/${API_VERSION}/${AD_ACCOUNT_ID}/insights?access_token=${ACCESS_TOKEN}&level=ad&date_preset=last_7d&fields=ad_id,ad_name,spend,impressions,clicks,reach,actions&limit=500`;
+    const response7d = await fetch(url7d);
+    const data7d = await response7d.json();
+    if (data7d.error) throw new Error(`Meta API Error (7d): ${data7d.error.message}`);
+    const insights7d = data7d.data || [];
+    console.log(`   Found ${insights7d.length} ads`);
 
-    const url = `https://graph.facebook.com/${API_VERSION}/${AD_ACCOUNT_ID}/insights?access_token=${ACCESS_TOKEN}&level=ad&date_preset=last_7d&fields=ad_id,ad_name,spend,impressions,clicks,reach,ctr,cpc,actions&limit=500`;
+    console.log('\n📊 Fetching 28-day insights...');
+    const url28d = `https://graph.facebook.com/${API_VERSION}/${AD_ACCOUNT_ID}/insights?access_token=${ACCESS_TOKEN}&level=ad&date_preset=last_28d&fields=ad_id,ad_name,spend,impressions,clicks,reach,actions&limit=500`;
+    const response28d = await fetch(url28d);
+    const data28d = await response28d.json();
+    if (data28d.error) throw new Error(`Meta API Error (28d): ${data28d.error.message}`);
+    const insights28d = data28d.data || [];
+    console.log(`   Found ${insights28d.length} ads`);
 
-    const response = await fetch(url);
-    const data = await response.json();
-
-    if (data.error) {
-      throw new Error(`Meta API Error: ${data.error.message}`);
+    // Build maps
+    const map7d: Record<string, any> = {};
+    for (const i of insights7d) {
+      const leads = i.actions?.find((a: any) => a.action_type === 'lead')?.value || 0;
+      map7d[i.ad_id] = { spend: parseFloat(i.spend) || 0, impressions: parseInt(i.impressions) || 0, clicks: parseInt(i.clicks) || 0, reach: parseInt(i.reach) || 0, leads: parseInt(leads) };
+    }
+    const map28d: Record<string, any> = {};
+    for (const i of insights28d) {
+      const leads = i.actions?.find((a: any) => a.action_type === 'lead')?.value || 0;
+      map28d[i.ad_id] = { spend: parseFloat(i.spend) || 0, impressions: parseInt(i.impressions) || 0, clicks: parseInt(i.clicks) || 0, reach: parseInt(i.reach) || 0, leads: parseInt(leads) };
     }
 
-    const insights = data.data || [];
-    console.log(`   Found ${insights.length} ads with weekly insights`);
-
-    // Calculate total spend
-    const totalSpend = insights.reduce((sum: number, i: any) => sum + (parseFloat(i.spend) || 0), 0);
-    console.log(`   Total weekly spend: $${totalSpend.toLocaleString()}`);
-
-    // Store in meta_ad_insights table
+    // Merge and store
+    const allAdIds = new Set([...Object.keys(map7d), ...Object.keys(map28d)]);
     const today = new Date().toISOString().split('T')[0];
     let stored = 0;
     let errors = 0;
+    let totalSpend7d = 0;
+    let totalSpend28d = 0;
 
-    for (const insight of insights) {
-      const actions = insight.actions || [];
-      const leads = actions.find((a: any) => a.action_type === 'lead')?.value || 0;
+    for (const adId of allAdIds) {
+      const d7 = map7d[adId] || { spend: 0, impressions: 0, clicks: 0, reach: 0, leads: 0 };
+      const d28 = map28d[adId] || { spend: 0, impressions: 0, clicks: 0, reach: 0, leads: 0 };
+      totalSpend7d += d7.spend;
+      totalSpend28d += d28.spend;
 
       const snapshot = {
-        ad_id: insight.ad_id,
+        ad_id: adId,
         snapshot_date: today,
-        spend: parseFloat(insight.spend) || 0,
-        impressions: parseInt(insight.impressions) || 0,
-        clicks: parseInt(insight.clicks) || 0,
-        reach: parseInt(insight.reach) || 0,
-        leads: parseInt(leads),
-        ctr: parseFloat(insight.ctr) || 0,
-        cpc: parseFloat(insight.cpc) || 0
+        spend: d7.spend,
+        impressions: d7.impressions,
+        clicks: d7.clicks,
+        reach: d7.reach,
+        leads: d7.leads,
+        spend_28d: d28.spend,
+        impressions_28d: d28.impressions,
+        clicks_28d: d28.clicks,
+        reach_28d: d28.reach,
+        leads_28d: d28.leads
       };
 
       const { error } = await supabaseAdmin
         .from('meta_ad_insights')
-        .upsert(snapshot, {
-          onConflict: 'ad_id,snapshot_date',
-          ignoreDuplicates: false
-        });
+        .upsert(snapshot, { onConflict: 'ad_id,snapshot_date', ignoreDuplicates: false });
 
-      if (error) {
-        errors++;
-      } else {
-        stored++;
-      }
+      if (error) errors++;
+      else stored++;
     }
 
     console.log(`\n✅ Meta Ads sync completed`);
-    console.log(`   Stored: ${stored} snapshots`);
-    console.log(`   Errors: ${errors} (likely FK constraint - ads not in meta_ads table)`);
+    console.log(`   7-day spend: $${totalSpend7d.toLocaleString()}`);
+    console.log(`   28-day spend: $${totalSpend28d.toLocaleString()}`);
+    console.log(`   Stored: ${stored}, Errors: ${errors}`);
 
     return NextResponse.json({
       success: true,
-      message: 'Meta Ads data synced successfully',
+      message: 'Meta Ads data synced (7d + 28d)',
       timestamp: new Date().toISOString(),
       stats: {
-        adsFound: insights.length,
-        totalWeeklySpend: totalSpend,
+        adsFound: allAdIds.size,
+        spend7d: totalSpend7d,
+        spend28d: totalSpend28d,
         snapshotsStored: stored,
         errors: errors
       }
