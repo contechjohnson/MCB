@@ -8,6 +8,9 @@ const supabaseAdmin = createClient(
   { auth: { persistSession: false } }
 );
 
+// LEGACY ENDPOINT: Hardcoded to PPCU tenant
+const PPCU_TENANT_ID = '2cb58664-a84a-4d74-844a-4ccd49fcef5a';
+
 /**
  * Perspective Webhook Handler
  *
@@ -49,6 +52,7 @@ export async function POST(request: NextRequest) {
 
     // Log the webhook
     await supabaseAdmin.from('webhook_logs').insert({
+      tenant_id: PPCU_TENANT_ID,
       source: 'perspective',
       event_type: 'checkout_form_submitted',
       payload: body,
@@ -62,6 +66,7 @@ export async function POST(request: NextRequest) {
     if (!contactId) {
       console.warn('No contact found for Perspective checkout:', email);
       await supabaseAdmin.from('webhook_logs').insert({
+        tenant_id: PPCU_TENANT_ID,
         source: 'perspective',
         event_type: 'checkout_form_submitted',
         payload: body,
@@ -88,6 +93,7 @@ export async function POST(request: NextRequest) {
     if (updateError) {
       console.error('Error updating contact:', updateError);
       await supabaseAdmin.from('webhook_logs').insert({
+        tenant_id: PPCU_TENANT_ID,
         source: 'perspective',
         event_type: 'checkout_form_submitted',
         payload: body,
@@ -101,6 +107,7 @@ export async function POST(request: NextRequest) {
 
     // Update webhook log
     await supabaseAdmin.from('webhook_logs').insert({
+      tenant_id: PPCU_TENANT_ID,
       source: 'perspective',
       event_type: 'checkout_form_submitted',
       contact_id: contactId,

@@ -14,6 +14,9 @@ const supabaseAdmin = createClient(
   { auth: { persistSession: false } }
 );
 
+// LEGACY ENDPOINT: Hardcoded to PPCU tenant
+const PPCU_TENANT_ID = '2cb58664-a84a-4d74-844a-4ccd49fcef5a';
+
 /**
  * Find contact by email with retry logic
  * Handles race conditions where payment webhook arrives before ManyChat creates contact
@@ -88,6 +91,7 @@ export async function POST(request: NextRequest) {
 
     // Log webhook
     await supabaseAdmin.from('webhook_logs').insert({
+      tenant_id: PPCU_TENANT_ID,
       source: 'stripe',
       event_type: event.type,
       payload: event,
@@ -198,6 +202,7 @@ async function handleCheckoutCompleted(event: Stripe.Event) {
     console.error('No email in checkout session - logging payment without email');
     // Still log the payment even without email
     await supabaseAdmin.from('payments').insert({
+      tenant_id: PPCU_TENANT_ID,
       contact_id: null,
       payment_event_id: event.id,
       payment_source: 'stripe',
@@ -223,6 +228,7 @@ async function handleCheckoutCompleted(event: Stripe.Event) {
 
   // Log payment (works for both matched and orphan payments)
   await supabaseAdmin.from('payments').insert({
+    tenant_id: PPCU_TENANT_ID,
     contact_id: contactId || null,  // NULL = orphan (only after 3 retry attempts)
     payment_event_id: event.id,
     payment_source: 'stripe',
@@ -359,6 +365,7 @@ async function handleChargeRefunded(event: Stripe.Event) {
 
   // Log refund as negative payment
   await supabaseAdmin.from('payments').insert({
+    tenant_id: PPCU_TENANT_ID,
     contact_id: contactId,
     payment_event_id: event.id,
     payment_source: 'stripe',

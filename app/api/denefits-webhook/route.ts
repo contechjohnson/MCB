@@ -8,6 +8,9 @@ const supabaseAdmin = createClient(
   { auth: { persistSession: false } }
 );
 
+// LEGACY ENDPOINT: Hardcoded to PPCU tenant
+const PPCU_TENANT_ID = '2cb58664-a84a-4d74-844a-4ccd49fcef5a';
+
 /**
  * Find contact by email with retry logic
  * Handles race conditions where payment webhook arrives before ManyChat creates contact
@@ -78,6 +81,7 @@ export async function POST(request: NextRequest) {
 
     // Log the webhook
     await supabaseAdmin.from('webhook_logs').insert({
+      tenant_id: PPCU_TENANT_ID,
       source: 'denefits',
       event_type: webhookType,
       payload: body,
@@ -127,6 +131,7 @@ export async function POST(request: NextRequest) {
         console.log(`  ⚠️  No payment found - creating from contract.date_added: ${contractCreatedDate}`);
 
         await supabaseAdmin.from('payments').insert({
+          tenant_id: PPCU_TENANT_ID,
           contact_id: contactId || null,
           payment_event_id: contractCode || `denefits_${contractId}`,
           payment_source: 'denefits',
@@ -168,6 +173,7 @@ export async function POST(request: NextRequest) {
       console.log(`  Amount: $${financedAmount}, Created: ${contractCreatedDate}`);
 
       await supabaseAdmin.from('payments').insert({
+        tenant_id: PPCU_TENANT_ID,
         contact_id: contactId || null,  // NULL = orphan
         payment_event_id: contractCode || `denefits_${contractId}`,
         payment_source: 'denefits',
@@ -198,6 +204,7 @@ export async function POST(request: NextRequest) {
     if (!contactId) {
       console.warn('No contact found for email:', email, '- Payment logged as orphan');
       await supabaseAdmin.from('webhook_logs').insert({
+        tenant_id: PPCU_TENANT_ID,
         source: 'denefits',
         event_type: webhookType,
         payload: body,
@@ -244,6 +251,7 @@ export async function POST(request: NextRequest) {
       if (updateError) {
         console.error('Error updating contact:', updateError);
         await supabaseAdmin.from('webhook_logs').insert({
+          tenant_id: PPCU_TENANT_ID,
           source: 'denefits',
           event_type: webhookType,
           payload: body,
@@ -262,6 +270,7 @@ export async function POST(request: NextRequest) {
 
     // Update webhook log
     await supabaseAdmin.from('webhook_logs').insert({
+      tenant_id: PPCU_TENANT_ID,
       source: 'denefits',
       event_type: webhookType,
       contact_id: contactId,

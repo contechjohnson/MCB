@@ -8,6 +8,9 @@ const supabaseAdmin = createClient(
   { auth: { persistSession: false } }
 );
 
+// LEGACY ENDPOINT: Hardcoded to PPCU tenant
+const PPCU_TENANT_ID = '2cb58664-a84a-4d74-844a-4ccd49fcef5a';
+
 /**
  * GoHighLevel Webhook Handler
  *
@@ -51,6 +54,7 @@ export async function POST(request: NextRequest) {
 
     // Log the webhook
     await supabaseAdmin.from('webhook_logs').insert({
+      tenant_id: PPCU_TENANT_ID,
       source: 'ghl',
       event_type: eventType,
       ghl_id: ghlContactId,
@@ -84,6 +88,7 @@ export async function POST(request: NextRequest) {
     if (updateError) {
       console.error('Error updating contact:', updateError);
       await supabaseAdmin.from('webhook_logs').insert({
+        tenant_id: PPCU_TENANT_ID,
         source: 'ghl',
         event_type: eventType,
         ghl_id: ghlContactId,
@@ -98,6 +103,7 @@ export async function POST(request: NextRequest) {
 
     // Update webhook log
     await supabaseAdmin.from('webhook_logs').insert({
+      tenant_id: PPCU_TENANT_ID,
       source: 'ghl',
       event_type: eventType,
       ghl_id: ghlContactId,
@@ -140,7 +146,8 @@ export async function GET() {
 
 /**
  * Find existing contact or create new one
- * Uses smart matching: GHL_ID > Email > Phone
+ * Uses smart matching: GHL_ID > MC_ID > Email > Phone
+ * LEGACY: Hardcoded to PPCU tenant
  */
 async function findOrCreateContactGHL(data: {
   ghlId: string;
@@ -151,44 +158,80 @@ async function findOrCreateContactGHL(data: {
   lastName?: string;
   source?: string | null;
 }): Promise<string> {
-  // Try smart finder (checks GHL_ID, MC_ID, email, phone)
-  const { data: existingId } = await supabaseAdmin
-    .rpc('find_contact_smart', {
-      search_ghl_id: data.ghlId,
-      search_mc_id: data.mcId || null,
-      search_email: data.email || null,
-      search_phone: data.phone || null
-    });
+  // Try finding by GHL ID first
+  const { data: byGhlId } = await supabaseAdmin
+    .from('contacts')
+    .select('id')
+    .eq('tenant_id', PPCU_TENANT_ID)
+    .eq('ghl_id', data.ghlId)
+    .single();
 
-  if (existingId) {
-    // Found existing contact - ensure ghl_id is set (might be ManyChat contact)
-    // Use dynamic update to bypass schema cache
-    await supabaseAdmin
-      .rpc('update_contact_dynamic', {
-        contact_id: existingId,
-        update_data: { ghl_id: data.ghlId }
-      });
-
-    return existingId;
+  if (byGhlId) {
+    return byGhlId.id;
   }
 
-  // Create new contact using function to bypass schema cache
+  // Try finding by MC_ID (might be ManyChat contact who booked)
+  if (data.mcId) {
+    const { data: byMcId } = await supabaseAdmin
+      .from('contacts')
+      .select('id')
+      .eq('tenant_id', PPCU_TENANT_ID)
+      .eq('mc_id', data.mcId)
+      .single();
+
+    if (byMcId) {
+      // Found ManyChat contact - link GHL ID
+      await supabaseAdmin
+        .rpc('update_contact_dynamic', {
+          contact_id: byMcId.id,
+          update_data: { ghl_id: data.ghlId }
+        });
+      return byMcId.id;
+    }
+  }
+
+  // Try finding by email
+  if (data.email) {
+    const { data: byEmail } = await supabaseAdmin
+      .from('contacts')
+      .select('id')
+      .eq('tenant_id', PPCU_TENANT_ID)
+      .ilike('email_primary', data.email)
+      .single();
+
+    if (byEmail) {
+      // Found by email - link GHL ID
+      await supabaseAdmin
+        .rpc('update_contact_dynamic', {
+          contact_id: byEmail.id,
+          update_data: { ghl_id: data.ghlId }
+        });
+      return byEmail.id;
+    }
+  }
+
+  // Create new contact (direct-to-funnel, no ManyChat)
   const { data: newContact, error } = await supabaseAdmin
-    .rpc('create_contact_with_ghl_id', {
+    .from('contacts')
+    .insert({
+      tenant_id: PPCU_TENANT_ID,
       ghl_id: data.ghlId,
-      contact_email: data.email || null,
-      contact_phone: data.phone || null,
-      contact_first_name: data.firstName || null,
-      contact_last_name: data.lastName || null,
-      contact_stage: 'form_submitted',
-      contact_source: data.source || 'website'  // Use provided source or default to website
-    });
+      email_booking: data.email || null,
+      phone: data.phone || null,
+      first_name: data.firstName || null,
+      last_name: data.lastName || null,
+      stage: 'form_submitted',
+      source: data.source || 'website',
+      subscribe_date: new Date().toISOString(),
+    })
+    .select('id')
+    .single();
 
   if (error) {
     throw new Error(`Failed to create contact: ${error.message}`);
   }
 
-  return newContact;
+  return newContact.id;
 }
 
 /**
