@@ -113,10 +113,24 @@ export async function POST(
     // Build update data
     const updateData = buildUpdateData(eventType, manychatData);
 
-    // Update contact
-    const { error: updateError } = await supabaseAdmin.rpc('update_contact_dynamic', {
-      contact_id: contactId,
-      update_data: updateData,
+    // Map ManyChat event types to standardized event types
+    const eventTypeMap: Record<string, string> = {
+      'contact_created': 'contact_subscribed',
+      'dm_qualified': 'dm_qualified',
+      'link_sent': 'link_sent',
+      'link_clicked': 'link_clicked',
+      'contact_update': 'contact_updated',
+    };
+
+    const standardEventType = eventType ? eventTypeMap[eventType] || null : null;
+
+    // Update contact AND create event (dual-write)
+    const { error: updateError } = await supabaseAdmin.rpc('update_contact_with_event', {
+      p_contact_id: contactId,
+      p_update_data: updateData,
+      p_event_type: standardEventType,
+      p_source: 'manychat',
+      p_source_event_id: standardEventType ? `mc_${subscriberId}_${Date.now()}` : null,
     });
 
     if (updateError) {

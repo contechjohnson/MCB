@@ -6,6 +6,11 @@ import {
   webhookSuccess,
   logWebhook,
 } from '../../_shared/tenant-context';
+import {
+  MetaCAPIClient,
+  queueCAPIEvent,
+  createPurchaseEvent,
+} from '@/lib/meta-capi/client';
 
 /**
  * Multi-Tenant Denefits Webhook Handler (via Make.com)
@@ -178,15 +183,62 @@ export async function POST(
 
       const totalAmount = totalPurchases?.reduce((sum, p) => sum + Number(p.amount), 0) || financedAmount;
 
-      await supabaseAdmin.rpc('update_contact_dynamic', {
-        contact_id: contactId,
-        update_data: {
+      await supabaseAdmin.rpc('update_contact_with_event', {
+        p_contact_id: contactId,
+        p_update_data: {
           email_payment: email,
           purchase_date: existingContact?.purchase_date || contractCreatedDate,
           purchase_amount: totalAmount,
           stage: 'purchased',
         },
+        p_event_type: 'purchase_completed',
+        p_source: 'denefits',
+        p_source_event_id: contractCode || `denefits_${contractId}`,
       });
+
+      // Fire Meta CAPI Purchase event for new contracts
+      if (paymentCreated && webhookType === 'contract.created') {
+        const metaClient = MetaCAPIClient.fromTenant(tenant);
+
+        // Get contact details for CAPI
+        const { data: contactData } = await supabaseAdmin
+          .from('contacts')
+          .select('id, email_primary, phone, first_name, last_name, fbclid, fbp, fbc, ad_id')
+          .eq('id', contactId)
+          .single();
+
+        if (metaClient && contactData) {
+          try {
+            const purchaseEvent = createPurchaseEvent(
+              {
+                email: email || contactData.email_primary,
+                phone: contactData.phone || contract.customer_mobile,
+                firstName: contactData.first_name || contract.customer_first_name,
+                lastName: contactData.last_name || contract.customer_last_name,
+                fbp: contactData.fbp,
+                fbc: contactData.fbc,
+                externalId: contactData.id,
+              },
+              financedAmount,
+              {
+                adId: contactData.ad_id,
+                contentName: 'Denefits BNPL Purchase',
+                orderId: contractCode,
+              }
+            );
+
+            await queueCAPIEvent(tenant.id, {
+              ...purchaseEvent,
+              contactId: contactData.id,
+            });
+
+            console.log(`[${tenantSlug}] Meta CAPI Purchase event queued for contact:`, contactData.id, `amount: $${financedAmount}`);
+          } catch (capiError) {
+            console.error(`[${tenantSlug}] Failed to queue CAPI event:`, capiError);
+            // Don't fail the webhook for CAPI errors
+          }
+        }
+      }
     }
 
     console.log(`[${tenantSlug}] Successfully processed Denefits ${webhookType} for ${email}`);

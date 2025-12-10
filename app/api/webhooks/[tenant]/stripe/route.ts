@@ -6,7 +6,13 @@ import {
   webhookError,
   webhookSuccess,
   logWebhook,
+  TenantContext,
 } from '../../_shared/tenant-context';
+import {
+  MetaCAPIClient,
+  queueCAPIEvent,
+  createPurchaseEvent,
+} from '@/lib/meta-capi/client';
 
 /**
  * Multi-Tenant Stripe Webhook Handler
@@ -95,7 +101,7 @@ export async function POST(
     if (eventType === 'checkout.session.created') {
       await handleCheckoutCreated(tenant.id, event);
     } else if (eventType === 'checkout.session.completed') {
-      await handleCheckoutCompleted(tenant.id, event);
+      await handleCheckoutCompleted(tenant, event);
     } else if (eventType === 'checkout.session.expired') {
       await handleCheckoutExpired(tenant.id, event);
     } else if (eventType === 'charge.refunded') {
@@ -186,9 +192,12 @@ async function handleCheckoutCreated(tenantId: string, event: Stripe.Event) {
     return;
   }
 
-  await supabaseAdmin.rpc('update_contact_dynamic', {
-    contact_id: contact.id,
-    update_data: { checkout_started: new Date().toISOString() },
+  await supabaseAdmin.rpc('update_contact_with_event', {
+    p_contact_id: contact.id,
+    p_update_data: { checkout_started: new Date().toISOString() },
+    p_event_type: 'checkout_started',
+    p_source: 'stripe',
+    p_source_event_id: `stripe_checkout_${sessionId}`,
   });
 
   console.log(`Checkout started for contact ${contact.id}`);
@@ -197,7 +206,8 @@ async function handleCheckoutCreated(tenantId: string, event: Stripe.Event) {
 /**
  * Handle successful checkout
  */
-async function handleCheckoutCompleted(tenantId: string, event: Stripe.Event) {
+async function handleCheckoutCompleted(tenant: TenantContext, event: Stripe.Event) {
+  const tenantId = tenant.id;
   const session = event.data.object as Stripe.Checkout.Session;
   const email = (session.customer_email || session.customer_details?.email)?.toLowerCase().trim();
   const amount = session.amount_total ? session.amount_total / 100 : 0;
@@ -240,18 +250,63 @@ async function handleCheckoutCompleted(tenantId: string, event: Stripe.Event) {
 
   const totalAmount = totalPurchases?.reduce((sum, p) => sum + Number(p.amount), 0) || amount;
 
-  await supabaseAdmin.rpc('update_contact_dynamic', {
-    contact_id: contactId,
-    update_data: {
+  await supabaseAdmin.rpc('update_contact_with_event', {
+    p_contact_id: contactId,
+    p_update_data: {
       email_payment: email,
       stripe_customer_id: customerId,
       purchase_date: new Date().toISOString(),
       purchase_amount: totalAmount,
       stage: 'purchased',
     },
+    p_event_type: 'purchase_completed',
+    p_source: 'stripe',
+    p_source_event_id: eventId,
   });
 
   console.log(`Payment recorded for contact ${contactId}: $${amount}`);
+
+  // Fire Meta CAPI Purchase event
+  const metaClient = MetaCAPIClient.fromTenant(tenant);
+
+  // Get contact details for CAPI
+  const { data: contact } = await supabaseAdmin
+    .from('contacts')
+    .select('id, email_primary, email_booking, phone, first_name, last_name, fbclid, fbp, fbc, ad_id')
+    .eq('id', contactId)
+    .single();
+
+  if (metaClient && contact) {
+    try {
+      const purchaseEvent = createPurchaseEvent(
+        {
+          email: email || contact.email_primary,
+          phone: contact.phone || session.customer_details?.phone || undefined,
+          firstName: contact.first_name || session.customer_details?.name?.split(' ')[0],
+          lastName: contact.last_name || session.customer_details?.name?.split(' ').slice(1).join(' '),
+          fbp: contact.fbp,
+          fbc: contact.fbc,
+          externalId: contact.id,
+        },
+        amount,
+        {
+          adId: contact.ad_id,
+          contentName: 'Stripe Purchase',
+          orderId: session.id,
+        }
+      );
+
+      await queueCAPIEvent(tenantId, {
+        ...purchaseEvent,
+        contactId: contact.id,
+      });
+
+      console.log(`Meta CAPI Purchase event queued for contact:`, contact.id, `amount: $${amount}`);
+    } catch (capiError) {
+      console.error('Failed to queue CAPI event:', capiError);
+      // Don't fail the webhook for CAPI errors
+    }
+  }
 }
 
 /**
@@ -272,9 +327,13 @@ async function handleCheckoutExpired(tenantId: string, event: Stripe.Event) {
 
   if (!contact) return;
 
-  await supabaseAdmin.rpc('update_contact_dynamic', {
-    contact_id: contact.id,
-    update_data: { checkout_started: new Date().toISOString() },
+  // Update contact but don't create event (checkout expiration not a standard event type)
+  await supabaseAdmin.rpc('update_contact_with_event', {
+    p_contact_id: contact.id,
+    p_update_data: { checkout_started: new Date().toISOString() },
+    p_event_type: null,
+    p_source: 'stripe',
+    p_source_event_id: null,
   });
 
   console.log(`Checkout expired for contact ${contact.id}`);
@@ -301,9 +360,12 @@ async function handleChargeRefunded(tenantId: string, event: Stripe.Event) {
 
   const newAmount = Math.max(0, (contact.purchase_amount || 0) - refundAmount);
 
-  await supabaseAdmin.rpc('update_contact_dynamic', {
-    contact_id: contact.id,
-    update_data: { purchase_amount: newAmount },
+  await supabaseAdmin.rpc('update_contact_with_event', {
+    p_contact_id: contact.id,
+    p_update_data: { purchase_amount: newAmount },
+    p_event_type: 'payment_refunded',
+    p_source: 'stripe',
+    p_source_event_id: event.id,
   });
 
   await supabaseAdmin.from('payments').insert({

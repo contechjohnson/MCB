@@ -6,6 +6,11 @@ import {
   webhookSuccess,
   logWebhook,
 } from '../../_shared/tenant-context';
+import {
+  MetaCAPIClient,
+  queueCAPIEvent,
+  createAddToCartEvent,
+} from '@/lib/meta-capi/client';
 
 /**
  * Multi-Tenant GoHighLevel Webhook Handler
@@ -82,10 +87,23 @@ export async function POST(
     // Build update data based on event
     const updateData = buildGHLUpdateData(eventType, body);
 
-    // Update contact
-    const { error: updateError } = await supabaseAdmin.rpc('update_contact_dynamic', {
-      contact_id: contactId,
-      update_data: updateData,
+    // Map GHL event types to standardized event types
+    const eventTypeMap: Record<string, string> = {
+      'OpportunityCreate': 'appointment_scheduled',
+      'MeetingCompleted': 'appointment_held',
+      'PackageSent': 'package_sent',
+      'ContactUpdate': 'contact_updated',
+    };
+
+    const standardEventType = eventType ? eventTypeMap[eventType] || null : null;
+
+    // Update contact AND create event (dual-write)
+    const { error: updateError } = await supabaseAdmin.rpc('update_contact_with_event', {
+      p_contact_id: contactId,
+      p_update_data: updateData,
+      p_event_type: standardEventType,
+      p_source: 'ghl',
+      p_source_event_id: standardEventType ? `ghl_${ghlContactId}_${Date.now()}` : null,
     });
 
     if (updateError) {
@@ -102,6 +120,49 @@ export async function POST(
     }
 
     console.log(`[${tenantSlug}] Successfully processed ${eventType} for GHL contact ${ghlContactId}`);
+
+    // Fire Meta CAPI AddToCart event for meeting bookings
+    const stage = (body.customData?.pipeline_stage || body.pipleline_stage || body.pipeline_stage || '').toLowerCase();
+    if (eventType === 'OpportunityCreate' && (stage.includes('booked') || stage.includes('scheduled'))) {
+      const metaClient = MetaCAPIClient.fromTenant(tenant);
+
+      // Get contact details for CAPI
+      const { data: contact } = await supabaseAdmin
+        .from('contacts')
+        .select('id, email_primary, email_booking, phone, first_name, last_name, fbclid, fbp, fbc, ad_id')
+        .eq('id', contactId)
+        .single();
+
+      if (metaClient && contact) {
+        try {
+          const addToCartEvent = createAddToCartEvent(
+            {
+              email: contact.email_booking || contact.email_primary || email,
+              phone: contact.phone || phone || undefined,
+              firstName: contact.first_name,
+              lastName: contact.last_name,
+              fbp: contact.fbp,
+              fbc: contact.fbc,
+              externalId: contact.id,
+            },
+            {
+              adId: contact.ad_id,
+              contentName: 'Consultation Booking',
+            }
+          );
+
+          await queueCAPIEvent(tenant.id, {
+            ...addToCartEvent,
+            contactId: contact.id,
+          });
+
+          console.log(`[${tenantSlug}] Meta CAPI AddToCart event queued for contact:`, contact.id);
+        } catch (capiError) {
+          console.error(`[${tenantSlug}] Failed to queue CAPI event:`, capiError);
+          // Don't fail the webhook for CAPI errors
+        }
+      }
+    }
 
     // Log success
     await logWebhook(supabaseAdmin, {

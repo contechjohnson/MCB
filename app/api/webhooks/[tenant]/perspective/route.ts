@@ -95,9 +95,12 @@ export async function POST(
     if (firstName) updateData.first_name = firstName;
     if (phone) updateData.phone = phone;
 
-    const { error: updateError } = await supabaseAdmin.rpc('update_contact_dynamic', {
-      contact_id: contact.id,
-      update_data: updateData,
+    const { error: updateError } = await supabaseAdmin.rpc('update_contact_with_event', {
+      p_contact_id: contact.id,
+      p_update_data: updateData,
+      p_event_type: 'checkout_started',
+      p_source: 'perspective',
+      p_source_event_id: `perspective_${email}_${Date.now()}`,
     });
 
     if (updateError) {
