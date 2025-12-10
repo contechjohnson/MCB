@@ -84,8 +84,11 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: 'Missing subscriber_id' }, { status: 200 });
     }
 
-    // Log the webhook
+    // Log the webhook (hardcoded PPCU tenant)
+    const PPCU_TENANT_ID = '2cb58664-a84a-4d74-844a-4ccd49fcef5a';
+
     await supabaseAdmin.from('webhook_logs').insert({
+      tenant_id: PPCU_TENANT_ID,
       source: 'manychat',
       event_type: eventType,
       mc_id: subscriberId,
@@ -100,6 +103,7 @@ export async function POST(request: NextRequest) {
       if (!manychatData) {
         console.error('Failed to fetch ManyChat data');
         await supabaseAdmin.from('webhook_logs').insert({
+          tenant_id: PPCU_TENANT_ID,
           source: 'manychat',
           event_type: eventType,
           mc_id: subscriberId,
@@ -126,6 +130,7 @@ export async function POST(request: NextRequest) {
     if (updateError) {
       console.error('Error updating contact:', updateError);
       await supabaseAdmin.from('webhook_logs').insert({
+        tenant_id: PPCU_TENANT_ID,
         source: 'manychat',
         event_type: eventType,
         mc_id: subscriberId,
@@ -140,6 +145,7 @@ export async function POST(request: NextRequest) {
 
     // Update webhook log status
     await supabaseAdmin.from('webhook_logs').insert({
+      tenant_id: PPCU_TENANT_ID,
       source: 'manychat',
       event_type: eventType,
       mc_id: subscriberId,
@@ -208,29 +214,41 @@ async function fetchManyChatData(subscriberId: string) {
 
 /**
  * Find existing contact by MC_ID or create new one
+ * LEGACY: Hardcoded to PPCU tenant until migration to multi-tenant endpoint
  */
 async function findOrCreateContact(subscriberId: string): Promise<string> {
-  // Try to find existing contact
-  const { data: existingId } = await supabaseAdmin
-    .rpc('find_contact_by_mc_id', { search_mc_id: subscriberId });
+  const PPCU_TENANT_ID = '2cb58664-a84a-4d74-844a-4ccd49fcef5a';
 
-  if (existingId) {
-    return existingId;
+  // Try to find existing contact
+  const { data: existing } = await supabaseAdmin
+    .from('contacts')
+    .select('id')
+    .eq('tenant_id', PPCU_TENANT_ID)
+    .eq('mc_id', subscriberId)
+    .single();
+
+  if (existing) {
+    return existing.id;
   }
 
-  // Create new contact using raw SQL to bypass schema cache
+  // Create new contact with tenant_id
   const { data: newContact, error } = await supabaseAdmin
-    .rpc('create_contact_with_mc_id', {
+    .from('contacts')
+    .insert({
+      tenant_id: PPCU_TENANT_ID,
       mc_id: subscriberId,
-      sub_date: new Date().toISOString(),
-      contact_stage: 'new_lead'
-    });
+      subscribe_date: new Date().toISOString(),
+      stage: 'new_lead',
+      source: 'instagram',
+    })
+    .select('id')
+    .single();
 
   if (error) {
     throw new Error(`Failed to create contact: ${error.message}`);
   }
 
-  return newContact;
+  return newContact.id;
 }
 
 /**
