@@ -234,6 +234,8 @@ ORDER BY created_at DESC LIMIT 20;
 | 2025-11-05 | ManyChat webhook returning 500 | Fixed: Array payload handling - MC sometimes sends `[{...}]` instead of `{...}` |
 | 2025-11-07 | GHL contacts not linking to MC contacts | Root cause: Email case mismatch. Fix: Use `.ilike()` instead of `.eq()` for email matching |
 | 2025-11-08 | Denefits payments not creating | Fixed: Make.com webhook URL was pointing to wrong environment |
+| 2025-12-09 | Multi-tenant migration broke legacy webhooks | **Critical:** After adding tenant_id constraint to `webhook_logs` and `payments` tables, all 4 legacy webhook endpoints stopped working (GHL, Stripe, Denefits, Perspective). Fixed: Added `PPCU_TENANT_ID` constant and `.eq('tenant_id', PPCU_TENANT_ID)` to all database inserts |
+| 2025-12-09 | Email reports including cross-tenant data | Weekly/monthly cron jobs were missing tenant_id filters on all queries. Fixed: Added tenant_id filters to all 20+ database queries in both cron jobs |
 
 ### Detailed Learnings
 
@@ -251,6 +253,58 @@ Users enter different emails in different contexts:
 - Stripe checkout: PayPal email or alternate
 
 This is why we track three email fields. Matching should try all three.
+
+**Multi-Tenant Migration Gotchas (Dec 2025):**
+When migrating from single-tenant to multi-tenant architecture, ALL database operations need tenant_id:
+
+**Schema Changes:**
+- `webhook_logs` and `payments` tables now require `tenant_id` (NOT NULL)
+- Legacy webhooks that omit tenant_id will fail with constraint violation
+
+**What Breaks:**
+1. **Legacy webhook endpoints** (`/api/manychat`, `/api/ghl-webhook`, etc.)
+   - Missing tenant_id on ALL `.insert()` calls
+   - Fix: Add hardcoded `PPCU_TENANT_ID` constant
+2. **Cron jobs** (weekly/monthly reports)
+   - Missing tenant_id filters on ALL `.select()` queries
+   - Result: Reports include data from ALL tenants
+   - Fix: Add `.eq('tenant_id', PPCU_TENANT_ID)` to every query
+3. **RPC functions** (like `find_contact_by_email`)
+   - Some RPC functions don't accept tenant_id parameter
+   - Fix: Rewrite to use direct table queries with tenant_id filter
+
+**Pattern for Legacy Endpoint Fixes:**
+```typescript
+// Add at top of file
+const PPCU_TENANT_ID = '2cb58664-a84a-4d74-844a-4ccd49fcef5a';
+
+// All inserts need tenant_id
+await supabase.from('webhook_logs').insert({
+  tenant_id: PPCU_TENANT_ID,  // ← ADD THIS
+  source: 'manychat',
+  // ...rest of fields
+});
+
+// All selects need tenant_id filter
+const { data } = await supabase
+  .from('contacts')
+  .select('*')
+  .eq('tenant_id', PPCU_TENANT_ID)  // ← ADD THIS
+  .eq('mc_id', mcId);
+```
+
+**Migration Checklist:**
+- [ ] Legacy webhook endpoints: Add tenant_id to all inserts
+- [ ] Legacy webhook endpoints: Add tenant_id filter to all selects
+- [ ] Cron jobs: Add tenant_id filter to ALL queries
+- [ ] RPC functions: Replace with direct queries if needed
+- [ ] Test: Verify webhooks process correctly
+- [ ] Test: Verify reports only show single tenant data
+
+**Why This Matters:**
+- Without tenant_id filters, cron jobs generate cross-tenant reports (security issue)
+- Without tenant_id on inserts, webhooks fail silently (data loss)
+- Migration is complete when both legacy AND multi-tenant endpoints work
 
 ---
 
