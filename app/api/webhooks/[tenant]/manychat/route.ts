@@ -88,8 +88,11 @@ export async function POST(
       status: 'received',
     });
 
+    console.log(`[${tenantSlug}] Logged 'received', hasData=${!!manychatData}, subscriberId=${subscriberId}`);
+
     // Fetch full subscriber data from ManyChat API if not provided
     if (!manychatData) {
+      console.log(`[${tenantSlug}] Fetching ManyChat data for ${subscriberId}...`);
       const apiKey = tenant.credentials.manychat?.api_key || process.env.MANYCHAT_API_KEY;
       manychatData = await fetchManyChatData(subscriberId, apiKey);
 
@@ -108,10 +111,13 @@ export async function POST(
     }
 
     // Find or create contact (tenant-scoped)
+    console.log(`[${tenantSlug}] Finding/creating contact for ${subscriberId}...`);
     const contactId = await findOrCreateContact(tenant.id, subscriberId);
+    console.log(`[${tenantSlug}] Contact ID: ${contactId}`);
 
     // Build update data
     const updateData = buildUpdateData(eventType, manychatData);
+    console.log(`[${tenantSlug}] Update data built, calling RPC...`);
 
     // Map ManyChat event types to standardized event types
     const eventTypeMap: Record<string, string> = {
@@ -132,6 +138,8 @@ export async function POST(
       p_source: 'manychat',
       p_source_event_id: standardEventType ? `mc_${subscriberId}_${Date.now()}` : null,
     });
+
+    console.log(`[${tenantSlug}] RPC completed, error=${!!updateError}`);
 
     if (updateError) {
       await logWebhook(supabaseAdmin, {

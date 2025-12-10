@@ -42,3 +42,4 @@ _archive_*/
 # CSV files everywhere EXCEPT historical_data
 *.csv
 !historical_data/*.csv
+.env.vercel.*
