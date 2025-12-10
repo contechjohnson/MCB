@@ -171,6 +171,7 @@ export async function GET(request: Request) {
     console.log('🚀 Monthly Report Cron');
     const url = new URL(request.url);
     const showIntro = url.searchParams.get('intro') === 'true';
+    const testMode = url.searchParams.get('test') === 'true';
     const weeks = getTrailing4Weeks();
 
     const weekData = [];
@@ -206,10 +207,13 @@ export async function GET(request: Request) {
     const csvContent = generateCSV(activeContacts);
     const filename = `PPCU_Monthly_Data_${weeks[0].start}_to_${weeks[3].end}.csv`;
 
+    // Test mode: only send to Connor
+    const recipients = testMode ? ['connor@columnline.com'] : REPORT_RECIPIENTS;
+
     const { error } = await resend.emails.send({
       from: process.env.RESEND_FROM_EMAIL || 'Clara Analytics <connor@columnline.app>',
-      to: REPORT_RECIPIENTS,
-      subject: `PPCU Monthly: $${totals.revenue.toLocaleString()} Revenue | ${totals.purchased} Sales`,
+      to: recipients,
+      subject: `${testMode ? '[TEST] ' : ''}PPCU Monthly: $${totals.revenue.toLocaleString()} Revenue | ${totals.purchased} Sales`,
       attachments: [
         {
           filename,

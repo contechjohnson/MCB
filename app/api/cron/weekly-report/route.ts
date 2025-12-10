@@ -22,6 +22,9 @@ const supabase = createClient(
 
 const resend = new Resend(process.env.RESEND_API_KEY);
 
+// PPCU tenant (hardcoded for now - TODO: make multi-tenant)
+const PPCU_TENANT_ID = '2cb58664-a84a-4d74-844a-4ccd49fcef5a';
+
 const COLORS = { primary: '#2563eb', success: '#059669' };
 
 // All report recipients
@@ -51,13 +54,13 @@ function getThisWeek() {
 async function fetchWeekActivity(startDate: string, endDate: string) {
   const endDateTime = endDate + 'T23:59:59';
   const [leads, qualified, linkClicked, formSubmitted, meetingHeld, purchased, payments] = await Promise.all([
-    supabase.from('contacts').select('id, ad_id').neq('source', 'instagram_historical').gte('subscribe_date', startDate).lte('subscribe_date', endDateTime),
-    supabase.from('contacts').select('id').neq('source', 'instagram_historical').gte('dm_qualified_date', startDate).lte('dm_qualified_date', endDateTime),
-    supabase.from('contacts').select('id').neq('source', 'instagram_historical').gte('link_click_date', startDate).lte('link_click_date', endDateTime),
-    supabase.from('contacts').select('id').neq('source', 'instagram_historical').gte('form_submit_date', startDate).lte('form_submit_date', endDateTime),
-    supabase.from('contacts').select('id').neq('source', 'instagram_historical').gte('appointment_held_date', startDate).lte('appointment_held_date', endDateTime),
-    supabase.from('contacts').select('id').neq('source', 'instagram_historical').gte('purchase_date', startDate).lte('purchase_date', endDateTime),
-    supabase.from('payments').select('amount').gte('payment_date', startDate).lte('payment_date', endDateTime)
+    supabase.from('contacts').select('id, ad_id').eq('tenant_id', PPCU_TENANT_ID).neq('source', 'instagram_historical').gte('subscribe_date', startDate).lte('subscribe_date', endDateTime),
+    supabase.from('contacts').select('id').eq('tenant_id', PPCU_TENANT_ID).neq('source', 'instagram_historical').gte('dm_qualified_date', startDate).lte('dm_qualified_date', endDateTime),
+    supabase.from('contacts').select('id').eq('tenant_id', PPCU_TENANT_ID).neq('source', 'instagram_historical').gte('link_click_date', startDate).lte('link_click_date', endDateTime),
+    supabase.from('contacts').select('id').eq('tenant_id', PPCU_TENANT_ID).neq('source', 'instagram_historical').gte('form_submit_date', startDate).lte('form_submit_date', endDateTime),
+    supabase.from('contacts').select('id').eq('tenant_id', PPCU_TENANT_ID).neq('source', 'instagram_historical').gte('appointment_held_date', startDate).lte('appointment_held_date', endDateTime),
+    supabase.from('contacts').select('id').eq('tenant_id', PPCU_TENANT_ID).neq('source', 'instagram_historical').gte('purchase_date', startDate).lte('purchase_date', endDateTime),
+    supabase.from('payments').select('amount').eq('tenant_id', PPCU_TENANT_ID).gte('payment_date', startDate).lte('payment_date', endDateTime)
   ]);
   return {
     leads: leads.data?.length || 0,
@@ -71,20 +74,20 @@ async function fetchWeekActivity(startDate: string, endDate: string) {
 }
 
 async function fetchAdSpend() {
-  const { data: latestSnapshot } = await supabase.from('meta_ad_insights').select('snapshot_date').order('snapshot_date', { ascending: false }).limit(1);
+  const { data: latestSnapshot } = await supabase.from('meta_ad_insights').select('snapshot_date').eq('tenant_id', PPCU_TENANT_ID).order('snapshot_date', { ascending: false }).limit(1);
   if (!latestSnapshot?.length) return 0;
-  const { data: insights } = await supabase.from('meta_ad_insights').select('spend').eq('snapshot_date', latestSnapshot[0].snapshot_date);
+  const { data: insights } = await supabase.from('meta_ad_insights').select('spend').eq('tenant_id', PPCU_TENANT_ID).eq('snapshot_date', latestSnapshot[0].snapshot_date);
   return insights?.reduce((sum, i) => sum + parseFloat(i.spend || '0'), 0) || 0;
 }
 
 async function fetchTopAds(startDate: string, endDate: string) {
-  const { data: contacts } = await supabase.from('contacts').select('ad_id').neq('source', 'instagram_historical').not('ad_id', 'is', null).gte('subscribe_date', startDate).lte('subscribe_date', endDate + 'T23:59:59');
+  const { data: contacts } = await supabase.from('contacts').select('ad_id').eq('tenant_id', PPCU_TENANT_ID).neq('source', 'instagram_historical').not('ad_id', 'is', null).gte('subscribe_date', startDate).lte('subscribe_date', endDate + 'T23:59:59');
   const adCounts: Record<string, number> = {};
   for (const c of contacts || []) { if (c.ad_id) adCounts[c.ad_id] = (adCounts[c.ad_id] || 0) + 1; }
   const sorted = Object.entries(adCounts).sort((a, b) => b[1] - a[1]).slice(0, 3);
   const topAds = [];
   for (const [adId, count] of sorted) {
-    const { data: ad } = await supabase.from('meta_ads').select('ad_name').eq('ad_id', adId).single();
+    const { data: ad } = await supabase.from('meta_ads').select('ad_name').eq('tenant_id', PPCU_TENANT_ID).eq('ad_id', adId).single();
     let name = ad?.ad_name || `Ad ${adId}`;
     if (name.length > 40) name = name.substring(0, 37) + '...';
     topAds.push({ ad_name: name, leads: count });
@@ -100,6 +103,7 @@ async function fetchActiveContacts(startDate: string, endDate: string) {
   const { data: contacts } = await supabase
     .from('contacts')
     .select('first_name, last_name, subscribe_date, dm_qualified_date, link_click_date, form_submit_date, appointment_held_date, purchase_date, q1_question, q2_question, objections, source, ad_id')
+    .eq('tenant_id', PPCU_TENANT_ID)
     .neq('source', 'instagram_historical')
     .or(`subscribe_date.gte.${startDate},dm_qualified_date.gte.${startDate},link_click_date.gte.${startDate},form_submit_date.gte.${startDate},appointment_held_date.gte.${startDate},purchase_date.gte.${startDate}`)
     .or(`subscribe_date.lte.${endDateTime},dm_qualified_date.lte.${endDateTime},link_click_date.lte.${endDateTime},form_submit_date.lte.${endDateTime},appointment_held_date.lte.${endDateTime},purchase_date.lte.${endDateTime}`);
@@ -163,6 +167,7 @@ export async function GET(request: Request) {
     console.log('🚀 Weekly Report Cron');
     const url = new URL(request.url);
     const showIntro = url.searchParams.get('intro') === 'true';
+    const testMode = url.searchParams.get('test') === 'true';
     const week = getThisWeek();
     const [activity, adSpend, topAds, activeContacts] = await Promise.all([
       fetchWeekActivity(week.start, week.end),
@@ -180,10 +185,13 @@ export async function GET(request: Request) {
     const csvContent = generateCSV(activeContacts);
     const filename = `PPCU_Weekly_Data_${week.start}_to_${week.end}.csv`;
 
+    // Test mode: only send to Connor
+    const recipients = testMode ? ['connor@columnline.com'] : REPORT_RECIPIENTS;
+
     const { error } = await resend.emails.send({
       from: process.env.RESEND_FROM_EMAIL || 'Clara Analytics <connor@columnline.app>',
-      to: REPORT_RECIPIENTS,
-      subject: `PPCU Weekly: ${week.label} - $${activity.revenue.toLocaleString()} Revenue`,
+      to: recipients,
+      subject: `${testMode ? '[TEST] ' : ''}PPCU Weekly: ${week.label} - $${activity.revenue.toLocaleString()} Revenue`,
       attachments: [
         {
           filename,
