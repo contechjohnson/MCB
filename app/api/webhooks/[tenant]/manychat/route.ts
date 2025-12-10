@@ -216,6 +216,10 @@ async function fetchManyChatData(subscriberId: string, apiKey: string | undefine
   }
 
   try {
+    // Add 5-second timeout to prevent hanging
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 5000);
+
     const response = await fetch(
       `${MANYCHAT_API_URL}/getInfo?subscriber_id=${subscriberId}`,
       {
@@ -224,8 +228,11 @@ async function fetchManyChatData(subscriberId: string, apiKey: string | undefine
           Authorization: `Bearer ${apiKey}`,
           'Content-Type': 'application/json',
         },
+        signal: controller.signal,
       }
     );
+
+    clearTimeout(timeoutId);
 
     if (!response.ok) {
       console.error('ManyChat API error:', response.status, response.statusText);
@@ -235,7 +242,11 @@ async function fetchManyChatData(subscriberId: string, apiKey: string | undefine
     const data = await response.json();
     return data.data;
   } catch (error) {
-    console.error('Error fetching ManyChat data:', error);
+    if (error instanceof Error && error.name === 'AbortError') {
+      console.error('ManyChat API timeout after 5 seconds');
+    } else {
+      console.error('Error fetching ManyChat data:', error);
+    }
     return null;
   }
 }
