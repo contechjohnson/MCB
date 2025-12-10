@@ -236,6 +236,8 @@ ORDER BY created_at DESC LIMIT 20;
 | 2025-11-08 | Denefits payments not creating | Fixed: Make.com webhook URL was pointing to wrong environment |
 | 2025-12-09 | Multi-tenant migration broke legacy webhooks | **Critical:** After adding tenant_id constraint to `webhook_logs` and `payments` tables, all 4 legacy webhook endpoints stopped working (GHL, Stripe, Denefits, Perspective). Fixed: Added `PPCU_TENANT_ID` constant and `.eq('tenant_id', PPCU_TENANT_ID)` to all database inserts |
 | 2025-12-09 | Email reports including cross-tenant data | Weekly/monthly cron jobs were missing tenant_id filters on all queries. Fixed: Added tenant_id filters to all 20+ database queries in both cron jobs |
+| 2025-12-09 | Multi-tenant webhook endpoints deployed | **Migration Complete:** All 5 webhook sources now have multi-tenant endpoints at `/api/webhooks/[tenant]/[source]`. Legacy endpoints still work. Created `WEBHOOK_MIGRATION_GUIDE.md` with step-by-step instructions for updating external systems. |
+| 2025-12-09 | Email reports refactored for multi-tenant | Weekly reports now support `?test=true` (send to connor@columnline.com only), `?tenant=slug` (specific tenant), and `?all=true` (all tenants). Tenant recipients stored in `tenants.config.report_recipients` JSONB array with fallback to `report_email`. Migration SQL ready but not yet applied. |
 
 ### Detailed Learnings
 
