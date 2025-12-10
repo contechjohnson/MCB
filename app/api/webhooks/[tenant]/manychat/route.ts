@@ -167,16 +167,20 @@ export async function POST(
   } catch (error) {
     console.error(`[${tenantSlug}] ManyChat webhook error:`, error);
 
-    // Log error to database
-    await logWebhook(supabaseAdmin, {
-      tenant_id: tenant.id,
-      source: 'manychat',
-      event_type: eventType || 'unknown',
-      payload: body,
-      mc_id: subscriberId,
-      status: 'error',
-      error_message: error instanceof Error ? error.message : 'Unknown error',
-    });
+    // Log error to database (safely handle undefined variables)
+    try {
+      await logWebhook(supabaseAdmin, {
+        tenant_id: tenant?.id || null,
+        source: 'manychat',
+        event_type: eventType || 'unknown',
+        payload: body || null,
+        mc_id: subscriberId || null,
+        status: 'error',
+        error_message: error instanceof Error ? error.message : 'Unknown error',
+      });
+    } catch (logError) {
+      console.error(`[${tenantSlug}] Failed to log error:`, logError);
+    }
 
     return webhookError(
       'Internal server error',
