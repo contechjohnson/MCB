@@ -10,6 +10,7 @@
 import { NextResponse } from 'next/server';
 import { createClient } from '@supabase/supabase-js';
 import { Resend } from 'resend';
+import { getTenantBySlug, getReportRecipients, getActiveTenants } from '@/lib/tenants/config';
 
 const supabase = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_URL!,
@@ -18,22 +19,7 @@ const supabase = createClient(
 
 const resend = new Resend(process.env.RESEND_API_KEY);
 
-// PPCU tenant (hardcoded for now - TODO: make multi-tenant)
-const PPCU_TENANT_ID = '2cb58664-a84a-4d74-844a-4ccd49fcef5a';
-
 const COLORS = { primary: '#2563eb', success: '#059669' };
-
-// All report recipients
-const REPORT_RECIPIENTS = [
-  'eric@ppcareusa.com',
-  'connor@columnline.com',
-  'yulia@theadgirls.com',
-  'hannah@theadgirls.com',
-  'jennifer@theadgirls.com',
-  'team@theadgirls.com',
-  'courtney@theadgirls.com',
-  'kristen@columnline.com'
-];
 
 function formatShortDate(dateStr: string) {
   const date = new Date(dateStr);
@@ -59,16 +45,16 @@ function getTrailing4Weeks() {
   return weeks.reverse();
 }
 
-async function fetchWeekActivity(startDate: string, endDate: string) {
+async function fetchWeekActivity(tenantId: string, startDate: string, endDate: string) {
   const endDateTime = endDate + 'T23:59:59';
   const [leads, qualified, linkClicked, formSubmitted, meetingHeld, purchased, payments] = await Promise.all([
-    supabase.from('contacts').select('id').eq('tenant_id', PPCU_TENANT_ID).neq('source', 'instagram_historical').gte('subscribe_date', startDate).lte('subscribe_date', endDateTime),
-    supabase.from('contacts').select('id').eq('tenant_id', PPCU_TENANT_ID).neq('source', 'instagram_historical').gte('dm_qualified_date', startDate).lte('dm_qualified_date', endDateTime),
-    supabase.from('contacts').select('id').eq('tenant_id', PPCU_TENANT_ID).neq('source', 'instagram_historical').gte('link_click_date', startDate).lte('link_click_date', endDateTime),
-    supabase.from('contacts').select('id').eq('tenant_id', PPCU_TENANT_ID).neq('source', 'instagram_historical').gte('form_submit_date', startDate).lte('form_submit_date', endDateTime),
-    supabase.from('contacts').select('id').eq('tenant_id', PPCU_TENANT_ID).neq('source', 'instagram_historical').gte('appointment_held_date', startDate).lte('appointment_held_date', endDateTime),
-    supabase.from('contacts').select('id').eq('tenant_id', PPCU_TENANT_ID).neq('source', 'instagram_historical').gte('purchase_date', startDate).lte('purchase_date', endDateTime),
-    supabase.from('payments').select('amount').eq('tenant_id', PPCU_TENANT_ID).gte('payment_date', startDate).lte('payment_date', endDateTime)
+    supabase.from('contacts').select('id').eq('tenant_id', tenantId).neq('source', 'instagram_historical').gte('subscribe_date', startDate).lte('subscribe_date', endDateTime),
+    supabase.from('contacts').select('id').eq('tenant_id', tenantId).neq('source', 'instagram_historical').gte('dm_qualified_date', startDate).lte('dm_qualified_date', endDateTime),
+    supabase.from('contacts').select('id').eq('tenant_id', tenantId).neq('source', 'instagram_historical').gte('link_click_date', startDate).lte('link_click_date', endDateTime),
+    supabase.from('contacts').select('id').eq('tenant_id', tenantId).neq('source', 'instagram_historical').gte('form_submit_date', startDate).lte('form_submit_date', endDateTime),
+    supabase.from('contacts').select('id').eq('tenant_id', tenantId).neq('source', 'instagram_historical').gte('appointment_held_date', startDate).lte('appointment_held_date', endDateTime),
+    supabase.from('contacts').select('id').eq('tenant_id', tenantId).neq('source', 'instagram_historical').gte('purchase_date', startDate).lte('purchase_date', endDateTime),
+    supabase.from('payments').select('amount').eq('tenant_id', tenantId).gte('payment_date', startDate).lte('payment_date', endDateTime)
   ]);
   return {
     leads: leads.data?.length || 0,
@@ -81,11 +67,11 @@ async function fetchWeekActivity(startDate: string, endDate: string) {
   };
 }
 
-async function fetchAdSpend() {
+async function fetchAdSpend(tenantId: string) {
   // Get actual 28-day spend (not 7-day estimate)
-  const { data: latestSnapshot } = await supabase.from('meta_ad_insights').select('snapshot_date').eq('tenant_id', PPCU_TENANT_ID).order('snapshot_date', { ascending: false }).limit(1);
+  const { data: latestSnapshot } = await supabase.from('meta_ad_insights').select('snapshot_date').eq('tenant_id', tenantId).order('snapshot_date', { ascending: false }).limit(1);
   if (!latestSnapshot?.length) return { spend7d: 0, spend28d: 0 };
-  const { data: insights } = await supabase.from('meta_ad_insights').select('spend, spend_28d').eq('tenant_id', PPCU_TENANT_ID).eq('snapshot_date', latestSnapshot[0].snapshot_date);
+  const { data: insights } = await supabase.from('meta_ad_insights').select('spend, spend_28d').eq('tenant_id', tenantId).eq('snapshot_date', latestSnapshot[0].snapshot_date);
   return {
     spend7d: insights?.reduce((sum, i) => sum + parseFloat(i.spend || '0'), 0) || 0,
     spend28d: insights?.reduce((sum, i) => sum + parseFloat(i.spend_28d || '0'), 0) || 0
@@ -93,13 +79,13 @@ async function fetchAdSpend() {
 }
 
 // Fetch active contacts for the full 4-week period
-async function fetchActiveContacts(startDate: string, endDate: string) {
+async function fetchActiveContacts(tenantId: string, startDate: string, endDate: string) {
   const endDateTime = endDate + 'T23:59:59';
 
   const { data: contacts } = await supabase
     .from('contacts')
     .select('first_name, last_name, subscribe_date, dm_qualified_date, link_click_date, form_submit_date, appointment_held_date, purchase_date, q1_question, q2_question, objections, source, ad_id')
-    .eq('tenant_id', PPCU_TENANT_ID)
+    .eq('tenant_id', tenantId)
     .neq('source', 'instagram_historical')
     .or(`subscribe_date.gte.${startDate},dm_qualified_date.gte.${startDate},link_click_date.gte.${startDate},form_submit_date.gte.${startDate},appointment_held_date.gte.${startDate},purchase_date.gte.${startDate}`)
     .or(`subscribe_date.lte.${endDateTime},dm_qualified_date.lte.${endDateTime},link_click_date.lte.${endDateTime},form_submit_date.lte.${endDateTime},appointment_held_date.lte.${endDateTime},purchase_date.lte.${endDateTime}`);
@@ -172,56 +158,105 @@ export async function GET(request: Request) {
     const url = new URL(request.url);
     const showIntro = url.searchParams.get('intro') === 'true';
     const testMode = url.searchParams.get('test') === 'true';
-    const weeks = getTrailing4Weeks();
+    const tenantSlug = url.searchParams.get('tenant') || 'ppcu'; // Default to PPCU for backward compatibility
+    const allTenants = url.searchParams.get('all') === 'true'; // Run for all active tenants
 
-    const weekData = [];
-    for (const week of weeks) {
-      weekData.push(await fetchWeekActivity(week.start, week.end));
+    // If all=true, run for all active tenants
+    if (allTenants) {
+      const tenants = await getActiveTenants();
+      const results = [];
+
+      for (const tenant of tenants) {
+        try {
+          const result = await generateMonthlyReport(tenant.id, tenant.slug, tenant.name, testMode, showIntro);
+          results.push({ tenant: tenant.slug, ...result });
+        } catch (err) {
+          console.error(`Error generating report for ${tenant.slug}:`, err);
+          results.push({ tenant: tenant.slug, error: err instanceof Error ? err.message : 'Unknown error' });
+        }
+      }
+
+      return NextResponse.json({ success: true, reports: results });
     }
 
-    const totals = {
-      leads: weekData.reduce((s, d) => s + d.leads, 0),
-      qualified: weekData.reduce((s, d) => s + d.qualified, 0),
-      link_clicked: weekData.reduce((s, d) => s + d.link_clicked, 0),
-      form_submitted: weekData.reduce((s, d) => s + d.form_submitted, 0),
-      meeting_held: weekData.reduce((s, d) => s + d.meeting_held, 0),
-      purchased: weekData.reduce((s, d) => s + d.purchased, 0),
-      revenue: weekData.reduce((s, d) => s + d.revenue, 0)
-    };
+    // Single tenant mode
+    const tenant = await getTenantBySlug(tenantSlug);
+    if (!tenant) {
+      return NextResponse.json({ error: `Tenant '${tenantSlug}' not found` }, { status: 404 });
+    }
 
-    // Fetch ad spend and active contacts
-    const [adSpend, activeContacts] = await Promise.all([
-      fetchAdSpend(),
-      fetchActiveContacts(weeks[0].start, weeks[3].end)
-    ]);
+    const result = await generateMonthlyReport(tenant.id, tenant.slug, tenant.name, testMode, showIntro);
+    return NextResponse.json(result);
+  } catch (err) {
+    console.error('Cron error:', err);
+    return NextResponse.json({ error: 'Internal error' }, { status: 500 });
+  }
+}
 
-    const monthlySpend = adSpend.spend28d; // Use actual 28-day spend
-    const cpl = totals.leads > 0 ? monthlySpend / totals.leads : 0;
-    const cpa = totals.purchased > 0 ? monthlySpend / totals.purchased : 0;
-    const roas = monthlySpend > 0 ? totals.revenue / monthlySpend : 0;
+/**
+ * Generate monthly report for a single tenant
+ */
+async function generateMonthlyReport(
+  tenantId: string,
+  tenantSlug: string,
+  tenantName: string,
+  testMode: boolean,
+  showIntro: boolean
+) {
+  const weeks = getTrailing4Weeks();
+  const tenant = await getTenantBySlug(tenantSlug);
+  if (!tenant) {
+    throw new Error(`Tenant ${tenantSlug} not found`);
+  }
 
-    const revenueChartUrl = generateRevenueChartUrl(weeks, weekData);
-    const funnelChartUrl = generateFunnelChartUrl(totals);
+  const weekData = [];
+  for (const week of weeks) {
+    weekData.push(await fetchWeekActivity(tenantId, week.start, week.end));
+  }
 
-    // Generate CSV attachment
-    const csvContent = generateCSV(activeContacts);
-    const filename = `PPCU_Monthly_Data_${weeks[0].start}_to_${weeks[3].end}.csv`;
+  const totals = {
+    leads: weekData.reduce((s, d) => s + d.leads, 0),
+    qualified: weekData.reduce((s, d) => s + d.qualified, 0),
+    link_clicked: weekData.reduce((s, d) => s + d.link_clicked, 0),
+    form_submitted: weekData.reduce((s, d) => s + d.form_submitted, 0),
+    meeting_held: weekData.reduce((s, d) => s + d.meeting_held, 0),
+    purchased: weekData.reduce((s, d) => s + d.purchased, 0),
+    revenue: weekData.reduce((s, d) => s + d.revenue, 0)
+  };
 
-    // Test mode: only send to Connor
-    const recipients = testMode ? ['connor@columnline.com'] : REPORT_RECIPIENTS;
+  // Fetch ad spend and active contacts
+  const [adSpend, activeContacts] = await Promise.all([
+    fetchAdSpend(tenantId),
+    fetchActiveContacts(tenantId, weeks[0].start, weeks[3].end)
+  ]);
 
-    const { error } = await resend.emails.send({
-      from: process.env.RESEND_FROM_EMAIL || 'Clara Analytics <connor@columnline.app>',
-      to: recipients,
-      subject: `${testMode ? '[TEST] ' : ''}PPCU Monthly: $${totals.revenue.toLocaleString()} Revenue | ${totals.purchased} Sales`,
+  const monthlySpend = adSpend.spend28d; // Use actual 28-day spend
+  const cpl = totals.leads > 0 ? monthlySpend / totals.leads : 0;
+  const cpa = totals.purchased > 0 ? monthlySpend / totals.purchased : 0;
+  const roas = monthlySpend > 0 ? totals.revenue / monthlySpend : 0;
+
+  const revenueChartUrl = generateRevenueChartUrl(weeks, weekData);
+  const funnelChartUrl = generateFunnelChartUrl(totals);
+
+  // Generate CSV attachment
+  const csvContent = generateCSV(activeContacts);
+  const filename = `${tenantSlug.toUpperCase()}_Monthly_Data_${weeks[0].start}_to_${weeks[3].end}.csv`;
+
+  // Test mode: only send to Connor, otherwise use tenant's configured recipients
+  const recipients = testMode ? ['connor@columnline.com'] : getReportRecipients(tenant);
+
+  const { error } = await resend.emails.send({
+    from: process.env.RESEND_FROM_EMAIL || 'Clara Analytics <connor@columnline.app>',
+    to: recipients,
+    subject: `${testMode ? '[TEST] ' : ''}${tenantName} Monthly: $${totals.revenue.toLocaleString()} Revenue | ${totals.purchased} Sales`,
       attachments: [
         {
           filename,
           content: Buffer.from(csvContent).toString('base64')
         }
       ],
-      html: `<!DOCTYPE html><html><head><meta charset="utf-8"></head><body style="margin:0;padding:0;background:#f9fafb;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;"><div style="max-width:600px;margin:0 auto;padding:16px;">
-        <div style="background:#1f2937;padding:20px;border-radius:8px 8px 0 0;text-align:center;"><h1 style="color:white;margin:0;font-size:20px;">PPCU Monthly Report</h1><p style="color:#9ca3af;margin:4px 0 0 0;font-size:13px;">4-Week Overview: ${weeks[0].label} to ${weeks[3].label}</p></div>
+    html: `<!DOCTYPE html><html><head><meta charset="utf-8"></head><body style="margin:0;padding:0;background:#f9fafb;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;"><div style="max-width:600px;margin:0 auto;padding:16px;">
+        <div style="background:#1f2937;padding:20px;border-radius:8px 8px 0 0;text-align:center;"><h1 style="color:white;margin:0;font-size:20px;">${tenantName} Monthly Report</h1><p style="color:#9ca3af;margin:4px 0 0 0;font-size:13px;">4-Week Overview: ${weeks[0].label} to ${weeks[3].label}</p></div>
         ${showIntro ? `<div style="background:#fef3c7;padding:16px;border-left:4px solid #f59e0b;"><p style="margin:0;font-size:14px;color:#92400e;"><strong>This report is now automated!</strong> You'll receive this monthly summary on the 1st of each month with a 4-week overview, revenue trends, and a CSV of all active contacts. Weekly reports arrive every Thursday at 5 PM EST.</p></div>` : ''}
         <div style="background:#eff6ff;padding:20px;"><table style="width:100%;"><tr><td style="text-align:center;padding:8px;"><div style="font-size:28px;font-weight:700;color:#1e40af;">${totals.leads.toLocaleString()}</div><div style="font-size:12px;color:#6b7280;">Total Leads</div></td><td style="text-align:center;padding:8px;"><div style="font-size:28px;font-weight:700;color:#1e40af;">${totals.purchased}</div><div style="font-size:12px;color:#6b7280;">Purchased</div></td><td style="text-align:center;padding:8px;"><div style="font-size:28px;font-weight:700;color:${COLORS.success};">$${totals.revenue.toLocaleString()}</div><div style="font-size:12px;color:#6b7280;">Revenue</div></td></tr></table></div>
         <div style="background:white;padding:16px;"><img src="${revenueChartUrl}" alt="Revenue" style="width:100%;height:auto;"/></div>
@@ -232,19 +267,15 @@ export async function GET(request: Request) {
         <div style="background:#eff6ff;padding:12px;text-align:center;border-top:1px solid #e5e7eb;"><p style="margin:0;font-size:12px;color:#1e40af;">📎 CSV file attached with ${activeContacts.length} active contacts</p></div>
         <div style="text-align:center;padding:12px;background:#1f2937;border-radius:0 0 8px 8px;"><span style="color:#6b7280;font-size:11px;">Clara Analytics</span></div>
       </div></body></html>`
-    });
+  });
 
-    if (error) {
-      console.error('Email error:', error);
-      return NextResponse.json({ error: 'Failed to send email' }, { status: 500 });
-    }
-
-    console.log(`✅ Monthly report sent with ${activeContacts.length} contacts attached`);
-    return NextResponse.json({ success: true, weeks: `${weeks[0].label} to ${weeks[3].label}`, contactsExported: activeContacts.length });
-  } catch (err) {
-    console.error('Cron error:', err);
-    return NextResponse.json({ error: 'Internal error' }, { status: 500 });
+  if (error) {
+    console.error('Email error:', error);
+    throw new Error('Failed to send email');
   }
+
+  console.log(`✅ Monthly report sent with ${activeContacts.length} contacts attached`);
+  return { success: true, weeks: `${weeks[0].label} to ${weeks[3].label}`, contactsExported: activeContacts.length };
 }
 
 export const runtime = 'nodejs';
