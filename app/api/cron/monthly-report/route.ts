@@ -11,6 +11,7 @@ import { NextResponse } from 'next/server';
 import { createClient } from '@supabase/supabase-js';
 import { Resend } from 'resend';
 import { getTenantBySlug, getReportRecipients, getActiveTenants } from '@/lib/tenants/config';
+import { main as syncMetaAds } from '@/execution/sync-meta-ads';
 
 const supabase = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_URL!,
@@ -207,6 +208,16 @@ async function generateMonthlyReport(
   const tenant = await getTenantBySlug(tenantSlug);
   if (!tenant) {
     throw new Error(`Tenant ${tenantSlug} not found`);
+  }
+
+  // Sync latest Meta Ads data before generating report
+  console.log(`🔄 Syncing Meta Ads data for ${tenantSlug}...`);
+  try {
+    await syncMetaAds();
+    console.log(`✅ Meta Ads sync complete for ${tenantSlug}`);
+  } catch (error) {
+    console.error(`⚠️  Meta Ads sync failed for ${tenantSlug}:`, error);
+    // Continue with report generation even if sync fails
   }
 
   const weekData = [];

@@ -15,6 +15,7 @@ import { NextResponse } from 'next/server';
 import { createClient } from '@supabase/supabase-js';
 import { Resend } from 'resend';
 import { getTenantBySlug, getReportRecipients, getActiveTenants } from '@/lib/tenants/config';
+import { main as syncMetaAds } from '@/execution/sync-meta-ads';
 
 const supabase = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_URL!,
@@ -67,16 +68,28 @@ async function fetchAdSpend(tenantId: string) {
 }
 
 async function fetchTopAds(tenantId: string, startDate: string, endDate: string) {
-  const { data: contacts } = await supabase.from('contacts').select('ad_id').eq('tenant_id', tenantId).neq('source', 'instagram_historical').not('ad_id', 'is', null).gte('subscribe_date', startDate).lte('subscribe_date', endDate + 'T23:59:59');
+  // Get contacts with meetings held (not just leads)
+  const { data: contacts } = await supabase
+    .from('contacts')
+    .select('ad_id')
+    .eq('tenant_id', tenantId)
+    .neq('source', 'instagram_historical')
+    .not('ad_id', 'is', null)
+    .not('appointment_held_date', 'is', null)  // Only contacts with meetings held
+    .gte('appointment_held_date', startDate)
+    .lte('appointment_held_date', endDate + 'T23:59:59');
+
   const adCounts: Record<string, number> = {};
-  for (const c of contacts || []) { if (c.ad_id) adCounts[c.ad_id] = (adCounts[c.ad_id] || 0) + 1; }
+  for (const c of contacts || []) {
+    if (c.ad_id) adCounts[c.ad_id] = (adCounts[c.ad_id] || 0) + 1;
+  }
   const sorted = Object.entries(adCounts).sort((a, b) => b[1] - a[1]).slice(0, 3);
   const topAds = [];
   for (const [adId, count] of sorted) {
     const { data: ad } = await supabase.from('meta_ads').select('ad_name').eq('tenant_id', tenantId).eq('ad_id', adId).single();
     let name = ad?.ad_name || `Ad ${adId}`;
     if (name.length > 40) name = name.substring(0, 37) + '...';
-    topAds.push({ ad_name: name, leads: count });
+    topAds.push({ ad_name: name, calls_booked: count });  // Changed from "leads" to "calls_booked"
   }
   return topAds;
 }
@@ -204,6 +217,17 @@ async function generateWeeklyReport(
   if (!tenant) {
     throw new Error(`Tenant ${tenantSlug} not found`);
   }
+
+  // Sync latest Meta Ads data before generating report
+  console.log(`🔄 Syncing Meta Ads data for ${tenantSlug}...`);
+  try {
+    await syncMetaAds();
+    console.log(`✅ Meta Ads sync complete for ${tenantSlug}`);
+  } catch (error) {
+    console.error(`⚠️  Meta Ads sync failed for ${tenantSlug}:`, error);
+    // Continue with report generation even if sync fails
+  }
+
     const [activity, adSpend, topAds, activeContacts] = await Promise.all([
       fetchWeekActivity(tenantId, week.start, week.end),
       fetchAdSpend(tenantId),
@@ -239,7 +263,7 @@ async function generateWeeklyReport(
         <div style="background:#eff6ff;padding:16px;"><table style="width:100%;"><tr><td style="text-align:center;"><div style="font-size:24px;font-weight:700;color:#1e40af;">${activity.leads}</div><div style="font-size:12px;color:#6b7280;">Leads</div></td><td style="text-align:center;"><div style="font-size:24px;font-weight:700;color:#1e40af;">${activity.purchased}</div><div style="font-size:12px;color:#6b7280;">Purchased</div></td><td style="text-align:center;"><div style="font-size:24px;font-weight:700;color:${COLORS.success};">$${activity.revenue.toLocaleString()}</div><div style="font-size:12px;color:#6b7280;">Revenue</div></td></tr></table></div>
         <div style="background:white;padding:16px;"><p style="margin:0 0 8px 0;font-weight:600;">Funnel This Week</p><img src="${funnelChartUrl}" alt="Funnel" style="width:100%;height:auto;"/></div>
         <div style="background:#f3f4f6;padding:16px;"><p style="margin:0 0 12px 0;font-weight:600;">Ad Performance</p><table style="width:100%;font-size:13px;"><tr><td style="color:#6b7280;">Ad Spend</td><td style="text-align:right;font-weight:600;">$${adSpend.toLocaleString()}</td></tr><tr><td style="color:#6b7280;">CPL</td><td style="text-align:right;font-weight:600;">$${cpl.toFixed(2)}</td></tr><tr><td style="color:#6b7280;">CPA</td><td style="text-align:right;font-weight:600;">$${cpa.toFixed(2)}</td></tr><tr><td style="color:#6b7280;">ROAS</td><td style="text-align:right;font-weight:600;color:${roas >= 1 ? COLORS.success : '#dc2626'};">${roas.toFixed(2)}x</td></tr></table></div>
-        <div style="background:white;padding:16px;"><p style="margin:0 0 8px 0;font-weight:600;">Top Ads</p>${topAds.length > 0 ? `<table style="width:100%;font-size:13px;border-collapse:collapse;">${topAds.map((ad, i) => `<tr style="border-bottom:1px solid #e5e7eb;"><td style="padding:6px 0;">${i + 1}. ${ad.ad_name}</td><td style="text-align:right;padding:6px 0;font-weight:600;">${ad.leads} leads</td></tr>`).join('')}</table>` : '<p style="color:#6b7280;">No attributed ads</p>'}</div>
+        <div style="background:white;padding:16px;"><p style="margin:0 0 8px 0;font-weight:600;">Top Ads</p>${topAds.length > 0 ? `<table style="width:100%;font-size:13px;border-collapse:collapse;">${topAds.map((ad, i) => `<tr style="border-bottom:1px solid #e5e7eb;"><td style="padding:6px 0;">${i + 1}. ${ad.ad_name}</td><td style="text-align:right;padding:6px 0;font-weight:600;">${ad.calls_booked} calls booked</td></tr>`).join('')}</table>` : '<p style="color:#6b7280;">No attributed ads</p>'}</div>
         <div style="background:#eff6ff;padding:12px;text-align:center;border-top:1px solid #e5e7eb;"><p style="margin:0;font-size:12px;color:#1e40af;">📎 CSV file attached with ${activeContacts.length} active contacts</p></div>
         <div style="text-align:center;padding:12px;background:#1f2937;border-radius:0 0 8px 8px;"><span style="color:#6b7280;font-size:11px;">Clara Analytics</span></div>
       </div></body></html>`

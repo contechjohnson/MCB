@@ -133,7 +133,7 @@ function getCopyLength(text) {
 
 /**
  * MODULE 1: Fetch all active ads with performance data
- * (Your exact script from Part 1)
+ * Now fetches BOTH 7-day and 28-day spend for accurate reporting
  */
 async function fetchActiveAds() {
   console.log('\n📊 Fetching active ads from Meta Ads API...\n');
@@ -155,18 +155,40 @@ async function fetchActiveAds() {
   const allAds = statusData.data;
   console.log(`✅ Found ${allAds.length} total ads`);
 
-  // Step 2: Fetch FULL performance data (all-time, not just 7 days)
-  const insightsUrl = `https://graph.facebook.com/${API_VERSION}/${AD_ACCOUNT_ID}/insights?access_token=${ACCESS_TOKEN}&level=ad&date_preset=maximum&fields=ad_id,ad_name,adset_id,campaign_id,date_start,date_stop,spend,impressions,clicks,reach,ctr,cpc,frequency,actions,cost_per_action_type&limit=500`;
+  // Step 2a: Fetch 7-day performance data
+  const insights7dUrl = `https://graph.facebook.com/${API_VERSION}/${AD_ACCOUNT_ID}/insights?access_token=${ACCESS_TOKEN}&level=ad&date_preset=last_7d&fields=ad_id,ad_name,adset_id,campaign_id,date_start,date_stop,spend,impressions,clicks,reach,ctr,cpc,frequency,actions,cost_per_action_type&limit=500`;
 
-  const insightsResponse = await fetch(insightsUrl);
-  const insightsData = await insightsResponse.json();
+  const insights7dResponse = await fetch(insights7dUrl);
+  const insights7dData = await insights7dResponse.json();
 
-  if (insightsData.error) {
-    throw new Error(`Meta Insights API Error: ${insightsData.error.message}`);
+  if (insights7dData.error) {
+    throw new Error(`Meta Insights 7d API Error: ${insights7dData.error.message}`);
   }
 
-  const insights = insightsData.data || [];
-  console.log(`✅ Found insights for ${insights.length} ads`);
+  const insights7d = insights7dData.data || [];
+  console.log(`✅ Found 7-day insights for ${insights7d.length} ads`);
+
+  // Step 2b: Fetch 28-day performance data
+  const insights28dUrl = `https://graph.facebook.com/${API_VERSION}/${AD_ACCOUNT_ID}/insights?access_token=${ACCESS_TOKEN}&level=ad&date_preset=last_28d&fields=ad_id,spend&limit=500`;
+
+  const insights28dResponse = await fetch(insights28dUrl);
+  const insights28dData = await insights28dResponse.json();
+
+  if (insights28dData.error) {
+    throw new Error(`Meta Insights 28d API Error: ${insights28dData.error.message}`);
+  }
+
+  const insights28d = insights28dData.data || [];
+  console.log(`✅ Found 28-day insights for ${insights28d.length} ads`);
+
+  // Create 28-day spend map
+  const spend28dMap = {};
+  insights28d.forEach(insight => {
+    spend28dMap[insight.ad_id] = parseFloat(insight.spend) || 0;
+  });
+
+  const insights = insights7d;
+  console.log(`✅ Combined insights ready`);
 
   // Step 3: Create insights map
   const insightsMap = {};
@@ -235,6 +257,9 @@ async function fetchActiveAds() {
         cost_per_landing_page_view: null
       };
 
+      // Get 28-day spend from separate map
+      const spend28d = spend28dMap[ad.id] || 0;
+
       return {
         ad_id: ad.id,
         ad_name: perf.ad_name,
@@ -249,8 +274,9 @@ async function fetchActiveAds() {
         date_stop: perf.date_stop || null,
         last_synced: new Date().toISOString(),
 
-        // Performance metrics (FULL, not just 7 days)
+        // Performance metrics (7-day)
         spend: perf.spend,
+        spend_28d: spend28d, // 28-day spend
         impressions: perf.impressions,
         clicks: perf.clicks,
         reach: perf.reach,
@@ -378,9 +404,14 @@ async function storeAd(adData) {
     return;
   }
 
+  const PPCU_TENANT_ID = '2cb58664-a84a-4d74-844a-4ccd49fcef5a'; // TODO: Make this dynamic for multi-tenant
+
   const { error } = await supabaseAdmin
     .from('meta_ads')
-    .upsert(adData, {
+    .upsert({
+      ...adData,
+      tenant_id: PPCU_TENANT_ID
+    }, {
       onConflict: 'ad_id',
       ignoreDuplicates: false
     });
@@ -421,15 +452,19 @@ async function storeCreative(creativeData) {
 }
 
 /**
- * Create daily snapshot
+ * Create daily snapshot with both 7-day and 28-day spend
  */
 async function createSnapshot(adData) {
   if (DRY_RUN) return;
 
+  const PPCU_TENANT_ID = '2cb58664-a84a-4d74-844a-4ccd49fcef5a'; // TODO: Make this dynamic for multi-tenant
+
   const snapshot = {
+    tenant_id: PPCU_TENANT_ID,
     ad_id: adData.ad_id,
     snapshot_date: new Date().toISOString().split('T')[0],
-    spend: adData.spend,
+    spend: adData.spend,  // 7-day spend
+    spend_28d: adData.spend_28d || null,  // 28-day spend
     impressions: adData.impressions,
     clicks: adData.clicks,
     reach: adData.reach,
