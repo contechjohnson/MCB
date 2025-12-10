@@ -21,6 +21,19 @@ node execution/sync-meta-ads.js       # Sync Meta Ads manually
 
 ---
 
+## Supabase Project
+
+**CRITICAL:** Always use the correct Supabase project ID when using MCP tools.
+
+**Project ID:** `succdcwblbzikenhhlrz`
+**Project Name:** MCB_PPCU
+**Region:** us-east-2
+**Database Host:** db.succdcwblbzikenhhlrz.supabase.co
+
+When using Supabase MCP tools (`mcp__supabase__*`), always use project_id: `succdcwblbzikenhhlrz`
+
+---
+
 ## Directive Map (What Do I Run?)
 
 **Philosophy:** Read the directive first, then run the command.
