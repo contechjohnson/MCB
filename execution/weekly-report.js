@@ -145,7 +145,7 @@ async function fetchAdSpend() {
 }
 
 async function fetchTopAds(limit = 3) {
-  // Get ads with most leads this week (by ad_id count in contacts)
+  // Get ads with most calls (meetings held) this week (by ad_id count in contacts)
   const week = getThisWeek();
 
   const { data: contacts } = await supabase
@@ -153,8 +153,8 @@ async function fetchTopAds(limit = 3) {
     .select('ad_id')
     .neq('source', 'instagram_historical')
     .not('ad_id', 'is', null)
-    .gte('subscribe_date', week.start)
-    .lte('subscribe_date', week.end + 'T23:59:59');
+    .gte('appointment_held_date', week.start)
+    .lte('appointment_held_date', week.end + 'T23:59:59');
 
   // Count by ad_id
   const adCounts = {};
@@ -179,7 +179,7 @@ async function fetchTopAds(limit = 3) {
     topAds.push({
       ad_id: adId,
       ad_name: ad?.ad_name || `Ad ${adId}`,
-      leads: count
+      calls: count
     });
   }
 
@@ -236,7 +236,7 @@ async function main() {
   const adData = await fetchAdSpend();
   console.log(`  Ad Spend (7-day): $${adData.spend.toLocaleString()}`);
 
-  console.log('Fetching top ads...');
+  console.log('Fetching top ads by calls...');
   const topAds = await fetchTopAds(3);
   console.log(`  Top ads: ${topAds.map(a => a.ad_name.substring(0, 20)).join(', ')}`);
 
@@ -316,17 +316,17 @@ async function main() {
 
           <!-- Top Ads -->
           <div style="background: white; padding: 16px; border-top: 1px solid #e5e7eb;">
-            <p style="margin: 0 0 8px 0; font-weight: 600; color: #1f2937;">Top Performing Ads</p>
+            <p style="margin: 0 0 8px 0; font-weight: 600; color: #1f2937;">Top Ads by Calls Booked</p>
             ${topAds.length > 0 ? `
             <table style="width: 100%; font-size: 12px; border-collapse: collapse;">
               ${topAds.map((ad, i) => `
               <tr style="border-bottom: 1px solid #e5e7eb;">
                 <td style="padding: 8px 0;">${i + 1}. ${ad.ad_name}</td>
-                <td style="padding: 8px 0; text-align: right; font-weight: 600;">${ad.leads} leads</td>
+                <td style="padding: 8px 0; text-align: right; font-weight: 600;">${ad.calls} calls</td>
               </tr>
               `).join('')}
             </table>
-            ` : '<p style="color: #6b7280; font-size: 13px;">No attributed ads this week</p>'}
+            ` : '<p style="color: #6b7280; font-size: 13px;">No attributed calls this week</p>'}
           </div>
 
           <!-- Footer -->

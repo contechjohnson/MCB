@@ -55,6 +55,12 @@ When using Supabase MCP tools (`mcp__supabase__*`), always use project_id: `succ
 | View recent activity | `directives/analytics.md` | `/recent-activity [tenant]` |
 | Source comparison | `directives/analytics.md` | `/source-performance [tenant]` |
 
+### Content Marketing
+
+| I Want To... | Directive | Command |
+|--------------|-----------|---------|
+| Find content outliers | `directives/content-outlier-detection.md` | `/content-outliers [niche]` |
+
 ### Tenant Management
 
 | I Want To... | Directive | Command |
@@ -135,6 +141,7 @@ Use `.ilike()` not `.eq()` when searching by email.
 | `meta-ads-sync.md` | `execution/sync-meta-ads.js` | Daily Meta Ads sync |
 | `weekly-reports.md` | `execution/weekly-report-ai.js` | AI-generated reports |
 | `analytics.md` | Slash commands | Funnel analysis, data quality |
+| `content-outlier-detection.md` | `execution/content-outlier-detection.js` | Find high-performing Instagram content |
 | `historical-data.md` | N/A | Filtering rules |
 
 ---
@@ -164,6 +171,7 @@ For multi-tenant, credentials are stored in `tenant_integrations` table.
 | `/db-status` | Database health check |
 | `/weekly-report [tenant]` | Generate full report |
 | `/web-analytics [query]` | Natural language queries |
+| `/content-outliers [niche]` | Find high-performing Instagram content |
 
 ---
 
@@ -186,6 +194,7 @@ Directives are living SOPs. They evolve with the system.
 | Debug webhook | `webhooks.md` | Query `webhook_logs` |
 | Sync ads | `meta-ads-sync.md` | `node execution/sync-meta-ads.js` |
 | Generate report | `weekly-reports.md` | `node execution/weekly-report-ai.js` |
+| Find content outliers | `content-outlier-detection.md` | `/content-outliers "niche"` |
 | Understand historical | `historical-data.md` | Filter `instagram_historical` |
 
 ---

@@ -24,6 +24,7 @@ WHERE source != 'instagram_historical'
 | Intent | Command | Notes |
 |--------|---------|-------|
 | Full funnel analysis | `/funnel ppcu last 30 days` | Stage-by-stage conversion |
+| **Funnel A/B compare** | `/funnel-compare ppcu 60 days` | Jane vs Calendly side-by-side |
 | Data quality check | `/data-quality ppcu` | Find missing fields, orphans |
 | Source comparison | `/source-performance ppcu` | Instagram vs website |
 | Recent activity | `/recent-activity ppcu 7d` | New contacts/events |
@@ -81,6 +82,35 @@ Lists recent:
 - Stage changes
 - Payments
 - Webhook events
+
+---
+
+## Funnel Variant Filtering
+
+**New (Dec 2025):** Filter by funnel variant for A/B testing:
+
+```sql
+-- Jane (paid consult) funnel only
+WHERE funnel_variant = 'jane_paid'
+
+-- Calendly (free discovery) funnel only
+WHERE funnel_variant = 'calendly_free'
+
+-- Both (for comparison)
+WHERE funnel_variant IN ('jane_paid', 'calendly_free')
+```
+
+See `directives/funnel-ab-testing.md` for full documentation.
+
+### `/funnel-compare [tenant] [time-range]`
+
+Side-by-side comparison of funnel variants:
+- Total leads per variant
+- Conversion rates at each stage
+- Revenue per lead
+- Delta (difference) between variants
+
+Default time range: 60 days (longer for meaningful comparison)
 
 ---
 
@@ -150,6 +180,24 @@ WHERE ma.tenant_id = 'tenant-uuid'
 GROUP BY ma.ad_id, ma.ad_name, ma.spend
 ORDER BY revenue DESC NULLS LAST
 LIMIT 10;
+```
+
+### Funnel Variant Comparison
+```sql
+SELECT
+  funnel_variant,
+  COUNT(*) as total_leads,
+  COUNT(CASE WHEN form_submit_date IS NOT NULL THEN 1 END) as form_submitted,
+  COUNT(CASE WHEN appointment_held_date IS NOT NULL THEN 1 END) as meeting_held,
+  COUNT(CASE WHEN purchase_date IS NOT NULL THEN 1 END) as purchased,
+  ROUND(100.0 * COUNT(CASE WHEN purchase_date IS NOT NULL THEN 1 END) / NULLIF(COUNT(*), 0), 1) as conversion_pct,
+  SUM(COALESCE(purchase_amount, 0)) as revenue
+FROM contacts
+WHERE tenant_id = 'tenant-uuid'
+  AND source != 'instagram_historical'
+  AND funnel_variant IN ('jane_paid', 'calendly_free')
+  AND created_at >= NOW() - INTERVAL '60 days'
+GROUP BY funnel_variant;
 ```
 
 ---

@@ -63,6 +63,24 @@ export async function POST(
       return webhookError('Missing contact_id');
     }
 
+    // Skip NO SHOW events - just log and return success
+    if (eventType === 'NoShow') {
+      console.log(`[${tenantSlug}] Skipping NO SHOW event for GHL contact ${ghlContactId}`);
+      await logWebhook(supabaseAdmin, {
+        tenant_id: tenant.id,
+        source: 'ghl',
+        event_type: 'NoShow',
+        payload: body,
+        ghl_id: ghlContactId,
+        status: 'skipped',
+      });
+      return webhookSuccess({
+        message: 'NO SHOW event skipped',
+        ghl_id: ghlContactId,
+        tenant: tenantSlug,
+      });
+    }
+
     // Log webhook received
     await logWebhook(supabaseAdmin, {
       tenant_id: tenant.id,
@@ -84,8 +102,18 @@ export async function POST(
       source: customData.source || undefined,
     });
 
-    // Build update data based on event
-    const updateData = buildGHLUpdateData(eventType, body);
+    // Fetch current contact state to check for existing dates (prevents overwriting)
+    const { data: currentContact } = await supabaseAdmin
+      .from('contacts')
+      .select('appointment_held_date, appointment_date')
+      .eq('id', contactId)
+      .single();
+
+    // Build update data based on event (pass current state to prevent overwrites)
+    const updateData = buildGHLUpdateData(eventType, body, {
+      hasAppointmentHeldDate: !!currentContact?.appointment_held_date,
+      hasAppointmentDate: !!currentContact?.appointment_date,
+    });
 
     // Map GHL event types to standardized event types
     const eventTypeMap: Record<string, string> = {
@@ -271,7 +299,8 @@ async function findOrCreateContactGHL(
     }
   }
 
-  // Create new contact
+  // Create new contact - default to jane_paid funnel (ManyChat/DM flow)
+  // Contacts from Perspective discovery funnel will already exist with calendly_free
   const { data: newContact, error } = await supabaseAdmin
     .from('contacts')
     .insert({
@@ -283,6 +312,7 @@ async function findOrCreateContactGHL(
       last_name: data.lastName || null,
       stage: 'form_submitted',
       source: data.source || 'website',
+      funnel_variant: 'jane_paid', // Default for GHL-created contacts
     })
     .select('id')
     .single();
@@ -302,6 +332,12 @@ function determineEventTypeFromStage(body: any): string {
   const customStage = (customData.pipeline_stage || '').toLowerCase();
   const ghlStage = (body.pipleline_stage || body.pipeline_stage || '').toLowerCase();
 
+  // Skip NO SHOW - don't process these
+  if (ghlStage.includes('no show') || ghlStage.includes('noshow') || ghlStage.includes('no-show')) {
+    return 'NoShow';
+  }
+
+  // If customData.pipeline_stage exists, use it (Jane/CLARA pipeline)
   if (customStage === 'form_filled' || customStage === 'meeting_booked') {
     return 'OpportunityCreate';
   }
@@ -312,6 +348,17 @@ function determineEventTypeFromStage(body: any): string {
     return 'PackageSent';
   }
 
+  // FREE DISCOVERY CALL PIPELINE stages (no customData)
+  // "DC BOOKED" = meeting booked
+  if (ghlStage === 'dc booked') {
+    return 'OpportunityCreate';
+  }
+  // "Completed DC" = meeting attended
+  if (ghlStage === 'completed dc') {
+    return 'MeetingCompleted';
+  }
+
+  // Fallback detection
   if (ghlStage.includes('scheduled') || ghlStage.includes('booked')) {
     return 'OpportunityCreate';
   }
@@ -327,8 +374,13 @@ function determineEventTypeFromStage(body: any): string {
 
 /**
  * Build update data based on GHL event type
+ * @param currentState - Current contact state to prevent overwriting certain fields
  */
-function buildGHLUpdateData(eventType: string, body: any) {
+function buildGHLUpdateData(
+  eventType: string,
+  body: any,
+  currentState: { hasAppointmentHeldDate?: boolean; hasAppointmentDate?: boolean } = {}
+) {
   const customData = body.customData || {};
   const customFields = body;
 
@@ -362,8 +414,21 @@ function buildGHLUpdateData(eventType: string, body: any) {
         appointment_date: appointmentTime ? new Date(appointmentTime).toISOString() : new Date().toISOString(),
       };
     }
+    // DC BOOKED from FREE DISCOVERY CALL PIPELINE
+    if (stage === 'dc booked') {
+      return {
+        ...baseData,
+        stage: 'meeting_booked',
+        appointment_date: appointmentTime ? new Date(appointmentTime).toISOString() : new Date().toISOString(),
+      };
+    }
     if (stage === 'meeting_attended') {
-      return { ...baseData, appointment_held_date: new Date().toISOString(), stage: 'meeting_held' };
+      // Only set appointment_held_date if not already set (prevents overwriting)
+      const result: any = { ...baseData, stage: 'meeting_held' };
+      if (!currentState.hasAppointmentHeldDate) {
+        result.appointment_held_date = new Date().toISOString();
+      }
+      return result;
     }
     if (stage === 'package_sent') {
       return { ...baseData, package_sent_date: new Date().toISOString(), stage: 'package_sent' };
@@ -378,7 +443,10 @@ function buildGHLUpdateData(eventType: string, body: any) {
       opportunityData.stage = 'meeting_booked';
     }
     if (stage.includes('completed') || stage.includes('attended') || stage.includes('show')) {
-      opportunityData.appointment_held_date = new Date().toISOString();
+      // Only set appointment_held_date if not already set (prevents overwriting)
+      if (!currentState.hasAppointmentHeldDate) {
+        opportunityData.appointment_held_date = new Date().toISOString();
+      }
       opportunityData.stage = 'meeting_held';
     }
     if (stage.includes('package') || stage.includes('sent')) {
@@ -389,7 +457,12 @@ function buildGHLUpdateData(eventType: string, body: any) {
   }
 
   if (eventType === 'MeetingCompleted') {
-    return { ...baseData, appointment_held_date: new Date().toISOString(), stage: 'meeting_held' };
+    // Only set appointment_held_date if not already set (prevents overwriting from multiple triggers)
+    const result: any = { ...baseData, stage: 'meeting_held' };
+    if (!currentState.hasAppointmentHeldDate) {
+      result.appointment_held_date = new Date().toISOString();
+    }
+    return result;
   }
 
   if (eventType === 'PackageSent') {
