@@ -98,7 +98,18 @@ async function fetchWeekActivity(startDate, endDate) {
     countEventsByType('payment_plan_created', startDate, endDate)
   ]);
 
-  // Revenue breakdown: Stripe = cash, Denefits = projected
+  // === REVENUE METRICS ===
+  //
+  // Cash Collected = actual money in bank
+  //   - Stripe payments (pay in full)
+  //   - Denefits downpayments
+  //   - Denefits monthly installments
+  //
+  // Projected Revenue = total value from efforts this period
+  //   - Stripe payments
+  //   - Denefits contract value (new contracts only)
+
+  // Stripe payments
   const { data: stripePayments } = await supabase
     .from('payments')
     .select('amount')
@@ -106,16 +117,39 @@ async function fetchWeekActivity(startDate, endDate) {
     .gte('payment_date', startDate)
     .lte('payment_date', endDateTime);
 
-  const { data: denefitsPayments } = await supabase
+  const stripeTotal = stripePayments?.reduce((sum, p) => sum + parseFloat(p.amount || 0), 0) || 0;
+
+  // Denefits new contracts (BNPL)
+  const { data: denefitsContracts } = await supabase
     .from('payments')
     .select('amount, denefits_downpayment')
     .eq('payment_source', 'denefits')
+    .eq('payment_type', 'buy_now_pay_later')
     .gte('payment_date', startDate)
     .lte('payment_date', endDateTime);
 
-  const cashCollected = stripePayments?.reduce((sum, p) => sum + parseFloat(p.amount || 0), 0) || 0;
-  const projectedRevenue = denefitsPayments?.reduce((sum, p) => sum + parseFloat(p.amount || 0), 0) || 0;
-  const depositsTotal = denefitsPayments?.reduce((sum, p) => sum + parseFloat(p.denefits_downpayment || 0), 0) || 0;
+  const denefitsContractValue = denefitsContracts?.reduce((sum, p) => sum + parseFloat(p.amount || 0), 0) || 0;
+  const denefitsDownpayments = denefitsContracts?.reduce((sum, p) => sum + parseFloat(p.denefits_downpayment || 0), 0) || 0;
+
+  // Denefits monthly installments
+  const { data: denefitsMonthly } = await supabase
+    .from('payments')
+    .select('amount')
+    .eq('payment_source', 'denefits')
+    .eq('payment_type', 'monthly_payment')
+    .gte('payment_date', startDate)
+    .lte('payment_date', endDateTime);
+
+  const monthlyInstallments = denefitsMonthly?.reduce((sum, p) => sum + parseFloat(p.amount || 0), 0) || 0;
+
+  // CASH COLLECTED = Stripe + Denefits downpayments + monthly installments
+  const cashCollected = stripeTotal + denefitsDownpayments + monthlyInstallments;
+
+  // PROJECTED REVENUE = Stripe + Denefits contract value (new contracts only)
+  const projectedRevenue = stripeTotal + denefitsContractValue;
+
+  // Deposits shown separately
+  const depositsTotal = denefitsDownpayments;
 
   return {
     leads: subscribedCount + createdCount,
@@ -126,10 +160,11 @@ async function fetchWeekActivity(startDate, endDate) {
     meeting_held: meetingHeld,
     purchased: purchased + paymentPlanCreated,
     // Revenue breakdown
-    cashCollected,
-    projectedRevenue,
-    depositsTotal,
-    revenue: cashCollected + projectedRevenue
+    cashCollected,        // Actual money in bank
+    projectedRevenue,     // Total value from efforts
+    depositsTotal,        // BNPL deposits (subset of cashCollected)
+    // Total revenue = projected (value from this period's efforts)
+    revenue: projectedRevenue
   };
 }
 
@@ -287,43 +322,39 @@ async function main() {
 
           <!-- Key Metrics -->
           <div style="background: #eff6ff; padding: 20px;">
-            <table style="width: 100%;">
+            <table style="width: 100%; border-collapse: collapse;">
               <tr>
-                <td style="text-align: center; padding: 8px;">
-                  <div style="font-size: 28px; font-weight: 700; color: #1e40af;">${totals.leads.toLocaleString()}</div>
-                  <div style="font-size: 12px; color: #6b7280;">Total Leads</div>
+                <td style="text-align: center; padding: 12px; width: 33%;">
+                  <div style="font-size: 32px; font-weight: 700; color: #1e40af;">${totals.leads.toLocaleString()}</div>
+                  <div style="font-size: 13px; color: #6b7280; margin-top: 4px;">Total Leads</div>
                 </td>
-                <td style="text-align: center; padding: 8px;">
-                  <div style="font-size: 28px; font-weight: 700; color: #1e40af;">${totals.meeting_held}</div>
-                  <div style="font-size: 12px; color: #6b7280;">Meetings Held</div>
+                <td style="text-align: center; padding: 12px; width: 33%;">
+                  <div style="font-size: 32px; font-weight: 700; color: #1e40af;">${totals.meeting_held}</div>
+                  <div style="font-size: 13px; color: #6b7280; margin-top: 4px;">Meetings Held</div>
                 </td>
-                <td style="text-align: center; padding: 8px;">
-                  <div style="font-size: 28px; font-weight: 700; color: #1e40af;">${totals.purchased}</div>
-                  <div style="font-size: 12px; color: #6b7280;">Purchased</div>
+                <td style="text-align: center; padding: 12px; width: 33%;">
+                  <div style="font-size: 32px; font-weight: 700; color: #1e40af;">${totals.purchased}</div>
+                  <div style="font-size: 13px; color: #6b7280; margin-top: 4px;">Purchased</div>
                 </td>
               </tr>
             </table>
           </div>
 
           <!-- Revenue Breakdown -->
-          <div style="background: #ecfdf5; padding: 16px;">
-            <table style="width: 100%;">
+          <div style="background: #ecfdf5; padding: 20px;">
+            <table style="width: 100%; border-collapse: collapse;">
               <tr>
-                <td style="text-align: center; padding: 8px;">
-                  <div style="font-size: 24px; font-weight: 700; color: ${COLORS.success};">$${totals.cashCollected.toLocaleString()}</div>
-                  <div style="font-size: 11px; color: #6b7280;">Cash Collected</div>
+                <td style="text-align: center; padding: 12px; width: 33%;">
+                  <div style="font-size: 28px; font-weight: 700; color: ${COLORS.success};">$${totals.cashCollected.toLocaleString()}</div>
+                  <div style="font-size: 13px; color: #6b7280; margin-top: 4px;">Cash Collected</div>
                 </td>
-                <td style="text-align: center; padding: 8px;">
-                  <div style="font-size: 24px; font-weight: 700; color: #0891b2;">$${totals.projectedRevenue.toLocaleString()}</div>
-                  <div style="font-size: 11px; color: #6b7280;">Projected (BNPL)</div>
+                <td style="text-align: center; padding: 12px; width: 33%;">
+                  <div style="font-size: 28px; font-weight: 700; color: #1e40af;">$${totals.projectedRevenue.toLocaleString()}</div>
+                  <div style="font-size: 13px; color: #6b7280; margin-top: 4px;">Projected Revenue</div>
                 </td>
-                <td style="text-align: center; padding: 8px;">
-                  <div style="font-size: 24px; font-weight: 700; color: #7c3aed;">$${totals.depositsTotal.toLocaleString()}</div>
-                  <div style="font-size: 11px; color: #6b7280;">Deposits</div>
-                </td>
-                <td style="text-align: center; padding: 8px;">
-                  <div style="font-size: 24px; font-weight: 700; color: #1e40af;">$${totals.revenue.toLocaleString()}</div>
-                  <div style="font-size: 11px; color: #6b7280;">Total Revenue</div>
+                <td style="text-align: center; padding: 12px; width: 33%;">
+                  <div style="font-size: 28px; font-weight: 700; color: #7c3aed;">$${totals.depositsTotal.toLocaleString()}</div>
+                  <div style="font-size: 13px; color: #6b7280; margin-top: 4px;">BNPL Deposits</div>
                 </td>
               </tr>
             </table>

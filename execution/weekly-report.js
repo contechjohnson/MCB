@@ -43,13 +43,14 @@ function getThisWeek() {
 }
 
 /**
- * Count events by type within a date range
- * Uses funnel_events table as primary source (not contact fields)
+ * Count UNIQUE CONTACTS with a specific event type in date range
+ * Uses funnel_events table as primary source
+ * Returns distinct contact count, not total events
  */
 async function countEventsByType(eventType, startDate, endDate, tenantId = null) {
   let query = supabase
     .from('funnel_events')
-    .select('contact_id', { count: 'exact' })
+    .select('contact_id')
     .eq('event_type', eventType)
     .gte('event_timestamp', startDate)
     .lte('event_timestamp', endDate + 'T23:59:59');
@@ -58,8 +59,10 @@ async function countEventsByType(eventType, startDate, endDate, tenantId = null)
     query = query.eq('tenant_id', tenantId);
   }
 
-  const { count } = await query;
-  return count || 0;
+  const { data } = await query;
+  // Return UNIQUE contact count (not total events)
+  const uniqueContacts = [...new Set(data?.map(e => e.contact_id) || [])];
+  return uniqueContacts.length;
 }
 
 /**
@@ -116,8 +119,17 @@ async function fetchWeekActivity(startDate, endDate) {
   const purchased = deposits + fullPurchases + paymentPlans;
 
   // === REVENUE METRICS (from payments table) ===
+  //
+  // Cash Collected = actual money in bank
+  //   - Stripe payments (pay in full)
+  //   - Denefits downpayments
+  //   - Denefits monthly installments (if any)
+  //
+  // Projected Revenue = total value from efforts this period
+  //   - Stripe payments
+  //   - Denefits contract value (new contracts only, not monthly payments)
 
-  // Cash Collected = Stripe payments (actual money in bank)
+  // Stripe payments (pay in full)
   const { data: stripePayments } = await supabase
     .from('payments')
     .select('amount')
@@ -125,21 +137,40 @@ async function fetchWeekActivity(startDate, endDate) {
     .gte('payment_date', startDate)
     .lte('payment_date', endDateTime);
 
-  const cashCollected = stripePayments?.reduce((sum, p) => sum + parseFloat(p.amount || 0), 0) || 0;
+  const stripeTotal = stripePayments?.reduce((sum, p) => sum + parseFloat(p.amount || 0), 0) || 0;
 
-  // Projected Revenue = Denefits payment plans (financed amount)
-  const { data: denefitsPayments } = await supabase
+  // Denefits contracts (new BNPL contracts)
+  const { data: denefitsContracts } = await supabase
     .from('payments')
     .select('amount, denefits_downpayment')
     .eq('payment_source', 'denefits')
+    .eq('payment_type', 'buy_now_pay_later')
     .gte('payment_date', startDate)
     .lte('payment_date', endDateTime);
 
-  const projectedRevenue = denefitsPayments?.reduce((sum, p) => sum + parseFloat(p.amount || 0), 0) || 0;
+  const denefitsContractValue = denefitsContracts?.reduce((sum, p) => sum + parseFloat(p.amount || 0), 0) || 0;
+  const denefitsDownpayments = denefitsContracts?.reduce((sum, p) => sum + parseFloat(p.denefits_downpayment || 0), 0) || 0;
+  const depositCount = denefitsContracts?.filter(p => parseFloat(p.denefits_downpayment || 0) > 0).length || 0;
 
-  // Deposits = Denefits downpayments (actual cash from payment plans)
-  const depositsTotal = denefitsPayments?.reduce((sum, p) => sum + parseFloat(p.denefits_downpayment || 0), 0) || 0;
-  const depositCount = denefitsPayments?.filter(p => parseFloat(p.denefits_downpayment || 0) > 0).length || 0;
+  // Denefits monthly installments (actual cash received from existing plans)
+  const { data: denefitsMonthly } = await supabase
+    .from('payments')
+    .select('amount')
+    .eq('payment_source', 'denefits')
+    .eq('payment_type', 'monthly_payment')
+    .gte('payment_date', startDate)
+    .lte('payment_date', endDateTime);
+
+  const monthlyInstallments = denefitsMonthly?.reduce((sum, p) => sum + parseFloat(p.amount || 0), 0) || 0;
+
+  // CASH COLLECTED = Stripe + Denefits downpayments + monthly installments
+  const cashCollected = stripeTotal + denefitsDownpayments + monthlyInstallments;
+
+  // PROJECTED REVENUE = Stripe + Denefits contract value (new contracts only)
+  const projectedRevenue = stripeTotal + denefitsContractValue;
+
+  // Deposits shown separately (subset of cash collected)
+  const depositsTotal = denefitsDownpayments;
 
   // Total payments for count
   const { data: allPayments } = await supabase
@@ -161,12 +192,12 @@ async function fetchWeekActivity(startDate, endDate) {
     meeting_held,
     purchased,
     // Revenue breakdown
-    cashCollected,
-    projectedRevenue,
-    depositsTotal,
+    cashCollected,        // Actual money in bank (Stripe + deposits + installments)
+    projectedRevenue,     // Total value from efforts (Stripe + new BNPL contracts)
+    depositsTotal,        // Just the BNPL deposits (subset of cashCollected)
     depositCount,
-    // Total revenue (cash + projected)
-    revenue: cashCollected + projectedRevenue,
+    // Total revenue = projected (value from this period's efforts)
+    revenue: projectedRevenue,
     payment_count: allPayments?.length || 0
   };
 }
@@ -340,35 +371,43 @@ async function main() {
           </div>
 
           <!-- Key Metrics -->
-          <div style="background: #eff6ff; padding: 16px; display: flex; justify-content: space-between;">
-            <div style="text-align: center; flex: 1;">
-              <div style="font-size: 24px; font-weight: 700; color: #1e40af;">${activity.leads}</div>
-              <div style="font-size: 12px; color: #6b7280;">Leads</div>
-            </div>
-            <div style="text-align: center; flex: 1;">
-              <div style="font-size: 24px; font-weight: 700; color: #1e40af;">${activity.meeting_held}</div>
-              <div style="font-size: 12px; color: #6b7280;">Meetings Held</div>
-            </div>
-            <div style="text-align: center; flex: 1;">
-              <div style="font-size: 24px; font-weight: 700; color: #1e40af;">${activity.purchased}</div>
-              <div style="font-size: 12px; color: #6b7280;">Purchased</div>
-            </div>
+          <div style="background: #eff6ff; padding: 20px;">
+            <table style="width: 100%; border-collapse: collapse;">
+              <tr>
+                <td style="text-align: center; padding: 12px; width: 33%;">
+                  <div style="font-size: 32px; font-weight: 700; color: #1e40af;">${activity.leads}</div>
+                  <div style="font-size: 13px; color: #6b7280; margin-top: 4px;">Leads</div>
+                </td>
+                <td style="text-align: center; padding: 12px; width: 33%;">
+                  <div style="font-size: 32px; font-weight: 700; color: #1e40af;">${activity.meeting_held}</div>
+                  <div style="font-size: 13px; color: #6b7280; margin-top: 4px;">Meetings Held</div>
+                </td>
+                <td style="text-align: center; padding: 12px; width: 33%;">
+                  <div style="font-size: 32px; font-weight: 700; color: #1e40af;">${activity.purchased}</div>
+                  <div style="font-size: 13px; color: #6b7280; margin-top: 4px;">Purchased</div>
+                </td>
+              </tr>
+            </table>
           </div>
 
           <!-- Revenue Breakdown -->
-          <div style="background: #ecfdf5; padding: 16px; display: flex; justify-content: space-between;">
-            <div style="text-align: center; flex: 1;">
-              <div style="font-size: 24px; font-weight: 700; color: ${COLORS.success};">$${activity.cashCollected.toLocaleString()}</div>
-              <div style="font-size: 12px; color: #6b7280;">Cash Collected</div>
-            </div>
-            <div style="text-align: center; flex: 1;">
-              <div style="font-size: 24px; font-weight: 700; color: #0891b2;">$${activity.projectedRevenue.toLocaleString()}</div>
-              <div style="font-size: 12px; color: #6b7280;">Projected (BNPL)</div>
-            </div>
-            <div style="text-align: center; flex: 1;">
-              <div style="font-size: 24px; font-weight: 700; color: #7c3aed;">$${(activity.depositsTotal || 0).toLocaleString()}</div>
-              <div style="font-size: 12px; color: #6b7280;">Deposits (${activity.depositCount})</div>
-            </div>
+          <div style="background: #ecfdf5; padding: 20px;">
+            <table style="width: 100%; border-collapse: collapse;">
+              <tr>
+                <td style="text-align: center; padding: 12px; width: 33%;">
+                  <div style="font-size: 28px; font-weight: 700; color: ${COLORS.success};">$${activity.cashCollected.toLocaleString()}</div>
+                  <div style="font-size: 13px; color: #6b7280; margin-top: 4px;">Cash Collected</div>
+                </td>
+                <td style="text-align: center; padding: 12px; width: 33%;">
+                  <div style="font-size: 28px; font-weight: 700; color: #1e40af;">$${activity.projectedRevenue.toLocaleString()}</div>
+                  <div style="font-size: 13px; color: #6b7280; margin-top: 4px;">Projected Revenue</div>
+                </td>
+                <td style="text-align: center; padding: 12px; width: 33%;">
+                  <div style="font-size: 28px; font-weight: 700; color: #7c3aed;">$${(activity.depositsTotal || 0).toLocaleString()}</div>
+                  <div style="font-size: 13px; color: #6b7280; margin-top: 4px;">BNPL Deposits</div>
+                </td>
+              </tr>
+            </table>
           </div>
 
           <!-- Funnel Chart -->
