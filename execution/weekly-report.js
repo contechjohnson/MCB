@@ -288,8 +288,9 @@ async function fetchTopAds(limit = 3) {
     // Use actual name, or show truncated ID if not found
     let displayName = ad?.ad_name;
     if (!displayName) {
-      // Show last 6 digits for readability: "Ad ...500065"
-      displayName = adId.length > 10 ? `Ad ...${adId.slice(-6)}` : `Ad ${adId}`;
+      // Show last 6 digits for readability: "Ad #500065"
+      // Note: Avoid "..." as Gmail may interpret it as quoted content
+      displayName = adId.length > 10 ? `Ad #${adId.slice(-6)}` : `Ad ${adId}`;
     }
 
     topAds.push({

@@ -368,7 +368,7 @@ AD PERFORMANCE:
 - ROAS (on cash collected): ${weekData.metrics.roas}x
 
 TOP PERFORMING ADS:
-${weekData.topAds.map((ad, i) => `${i+1}. Ad ...${ad.adId.slice(-6)} (${ad.adName})
+${weekData.topAds.map((ad, i) => `${i+1}. Ad #${ad.adId.slice(-6)} (${ad.adName})
    - ${ad.contacts} contacts, ${ad.qualified} qualified (${ad.qualifyRate}%)
    - Theme: ${ad.theme}
    - Symptoms: ${ad.symptoms.join(', ') || 'general'}`).join('\n')}
