@@ -115,30 +115,31 @@ async function fetchWeekActivity(startDate, endDate) {
   const paymentPlans = await countEventsByType('payment_plan_created', startDate, endDate);
   const purchased = deposits + fullPurchases + paymentPlans;
 
-  // === REVENUE METRICS (from payments table with categories) ===
+  // === REVENUE METRICS (from payments table) ===
 
-  // Cash Collected (actual money received)
-  const { data: cashPayments } = await supabase
-    .from('payments')
-    .select('amount, payment_category')
-    .in('payment_category', ['deposit', 'full_purchase', 'downpayment', 'recurring'])
-    .gte('payment_date', startDate)
-    .lte('payment_date', endDateTime);
-
-  const cashCollected = cashPayments?.reduce((sum, p) => sum + parseFloat(p.amount || 0), 0) || 0;
-
-  // Projected Revenue (Denefits payment plans)
-  const { data: projectedPayments } = await supabase
+  // Cash Collected = Stripe payments (actual money in bank)
+  const { data: stripePayments } = await supabase
     .from('payments')
     .select('amount')
-    .eq('payment_category', 'payment_plan')
+    .eq('payment_source', 'stripe')
     .gte('payment_date', startDate)
     .lte('payment_date', endDateTime);
 
-  const projectedRevenue = projectedPayments?.reduce((sum, p) => sum + parseFloat(p.amount || 0), 0) || 0;
+  const cashCollected = stripePayments?.reduce((sum, p) => sum + parseFloat(p.amount || 0), 0) || 0;
 
-  // Deposits count (high intent metric)
-  const depositCount = cashPayments?.filter(p => p.payment_category === 'deposit').length || 0;
+  // Projected Revenue = Denefits payment plans (financed amount)
+  const { data: denefitsPayments } = await supabase
+    .from('payments')
+    .select('amount, denefits_downpayment')
+    .eq('payment_source', 'denefits')
+    .gte('payment_date', startDate)
+    .lte('payment_date', endDateTime);
+
+  const projectedRevenue = denefitsPayments?.reduce((sum, p) => sum + parseFloat(p.amount || 0), 0) || 0;
+
+  // Deposits = Denefits downpayments (actual cash from payment plans)
+  const depositsTotal = denefitsPayments?.reduce((sum, p) => sum + parseFloat(p.denefits_downpayment || 0), 0) || 0;
+  const depositCount = denefitsPayments?.filter(p => parseFloat(p.denefits_downpayment || 0) > 0).length || 0;
 
   // Total payments for count
   const { data: allPayments } = await supabase
@@ -147,20 +148,25 @@ async function fetchWeekActivity(startDate, endDate) {
     .gte('payment_date', startDate)
     .lte('payment_date', endDateTime);
 
+  // Link Sent (between qualified and link_clicked)
+  const link_sent = await countEventsByType('link_sent', startDate, endDate);
+
   return {
     leads: leads || newContacts?.length || 0,
     leads_with_ad,
     qualified,
+    link_sent,
     link_clicked,
     form_submitted,
     meeting_held,
     purchased,
-    // New revenue breakdown
+    // Revenue breakdown
     cashCollected,
     projectedRevenue,
+    depositsTotal,
     depositCount,
-    // Legacy field for backward compat
-    revenue: cashCollected,
+    // Total revenue (cash + projected)
+    revenue: cashCollected + projectedRevenue,
     payment_count: allPayments?.length || 0
   };
 }
@@ -249,9 +255,11 @@ async function fetchTopAds(limit = 3) {
 }
 
 function generateFunnelChartUrl(data) {
+  // Correct funnel order: Lead → Qualified → Link Sent → Link Clicked → Form → Meeting → Purchase
   const stages = [
     { name: 'Leads', count: data.leads },
-    { name: 'Qualified', count: data.qualified },
+    { name: 'DM Qualified', count: data.qualified },
+    { name: 'Link Sent', count: data.link_sent || 0 },
     { name: 'Link Clicked', count: data.link_clicked },
     { name: 'Form Submit', count: data.form_submitted },
     { name: 'Meeting Held', count: data.meeting_held },
@@ -264,7 +272,7 @@ function generateFunnelChartUrl(data) {
       labels: stages.map(s => s.name),
       datasets: [{
         data: stages.map(s => s.count),
-        backgroundColor: ['#3b82f6', '#2563eb', '#0891b2', '#0d9488', '#059669', '#065f46']
+        backgroundColor: ['#3b82f6', '#2563eb', '#1d4ed8', '#0891b2', '#0d9488', '#059669', '#065f46']
       }]
     },
     options: {
@@ -338,8 +346,8 @@ async function main() {
               <div style="font-size: 12px; color: #6b7280;">Leads</div>
             </div>
             <div style="text-align: center; flex: 1;">
-              <div style="font-size: 24px; font-weight: 700; color: #1e40af;">${activity.depositCount}</div>
-              <div style="font-size: 12px; color: #6b7280;">Deposits</div>
+              <div style="font-size: 24px; font-weight: 700; color: #1e40af;">${activity.meeting_held}</div>
+              <div style="font-size: 12px; color: #6b7280;">Meetings Held</div>
             </div>
             <div style="text-align: center; flex: 1;">
               <div style="font-size: 24px; font-weight: 700; color: #1e40af;">${activity.purchased}</div>
@@ -356,6 +364,10 @@ async function main() {
             <div style="text-align: center; flex: 1;">
               <div style="font-size: 24px; font-weight: 700; color: #0891b2;">$${activity.projectedRevenue.toLocaleString()}</div>
               <div style="font-size: 12px; color: #6b7280;">Projected (BNPL)</div>
+            </div>
+            <div style="text-align: center; flex: 1;">
+              <div style="font-size: 24px; font-weight: 700; color: #7c3aed;">$${(activity.depositsTotal || 0).toLocaleString()}</div>
+              <div style="font-size: 12px; color: #6b7280;">Deposits (${activity.depositCount})</div>
             </div>
           </div>
 

@@ -20,10 +20,11 @@
 **Funnel Stages (from funnel_events):**
 1. Leads (`contact_subscribed` + `contact_created` events)
 2. Qualified (`dm_qualified` event)
-3. Link Clicked (`link_clicked` event)
-4. Form Submitted (`form_submitted` event)
-5. Meeting Held (`meeting_held` event)
-6. Purchased (`purchase_completed` event)
+3. Link Sent (`link_sent` event)
+4. Link Clicked (`link_clicked` event)
+5. Form Submitted (`form_submitted` event)
+6. Meeting Held (`appointment_held` event) - Note: Only Calendly funnel, Jane skips this
+7. Purchased (`purchase_completed` + `payment_plan_created` events)
 
 **Architecture:** Events-first (Dec 2025) - queries `funnel_events` table, NOT contact date columns.
 
@@ -42,10 +43,11 @@
 ## Weekly Report
 
 **What it shows:**
-- This week's funnel (horizontal bar chart)
-- Key metrics: Leads, Purchased, Revenue
+- This week's funnel (7 stages, horizontal bar chart)
+- Key metrics: Leads, Meeting Held, Purchased
+- Revenue breakdown: Cash Collected, Projected (BNPL), Deposits, Total
 - Ad spend, CPL, CPA, ROAS
-- Top 3 performing ads (by lead count)
+- Top 3 performing ads (by calls booked)
 
 **Schedule:** Every Thursday at 5 PM EST
 **Cron:** `0 22 * * 4` (10 PM UTC = 5 PM EST)
@@ -55,8 +57,9 @@
 ## Monthly Report (4-Week Overview)
 
 **What it shows:**
+- Revenue breakdown: Cash Collected, Projected (BNPL), Deposits, Total
 - Revenue trend chart (4 weeks)
-- Funnel chart (4-week totals)
+- Funnel chart (7 stages, 4-week totals)
 - Week-by-week breakdown table
 - Ad metrics (CPL, CPA, ROAS)
 - Conversion rates
@@ -80,13 +83,18 @@ WHERE event_type = 'form_submitted'
 Event types:
 - **Leads:** `contact_subscribed` OR `contact_created`
 - **Qualified:** `dm_qualified`
+- **Link Sent:** `link_sent`
 - **Link Clicked:** `link_clicked`
 - **Form Submitted:** `form_submitted`
-- **Meeting Held:** `meeting_held`
-- **Purchased:** `purchase_completed`
+- **Meeting Held:** `appointment_held` (not `meeting_held`)
+- **Purchased:** `purchase_completed` OR `payment_plan_created`
 
-### Revenue
-Sum of `payments.amount` where `payment_date` in range.
+### Revenue Breakdown
+Three revenue metrics from `payments` table:
+- **Cash Collected:** Stripe payments (`payment_source = 'stripe'`)
+- **Projected Revenue:** Denefits payment plans (`payment_source = 'denefits'`)
+- **Deposits:** Denefits downpayments (`denefits_downpayment` column)
+- **Total Revenue:** Cash + Projected
 
 ### Ad Metrics
 - **Ad Spend:** From `meta_ad_insights` table (7-day rolling spend)
@@ -159,6 +167,11 @@ This removes 537 imported historical contacts.
 | 2025-12-06 | Cohort analysis showed wrong purchase counts | Simplified to pure activity-based |
 | 2025-12-06 | "Meeting Booked" not useful | Removed, only track "Meeting Held" |
 | 2025-12-06 | Too complex with cohort vs activity | Two simple reports, both activity-based |
+| 2025-12-25 | Reports showed wrong lead/purchase counts | Production code wasn't deployed; backfilled events from webhook_logs |
+| 2025-12-25 | Missing revenue breakdown | Added cash collected (Stripe), projected (Denefits), deposits (downpayments) |
+| 2025-12-25 | `meeting_held` not in event constraint | Changed to `appointment_held` |
+| 2025-12-25 | Funnel chart out of order, missing link_sent | Fixed order: Lead → Qualified → Link Sent → Clicked → Form → Meeting → Purchase |
+| 2025-12-25 | `payment_category` null for all payments | Query by `payment_source` (stripe/denefits) instead |
 
 ### Key Learning
 

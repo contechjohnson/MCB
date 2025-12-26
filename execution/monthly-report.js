@@ -75,35 +75,61 @@ async function countEventsByType(eventType, startDate, endDate) {
 async function fetchWeekActivity(startDate, endDate) {
   const endDateTime = endDate + 'T23:59:59';
 
-  // Events-first: Query funnel_events table instead of deprecated contact columns
+  // Events-first: Query funnel_events table
   const [
     subscribedCount,
     createdCount,
     qualified,
+    linkSent,
     linkClicked,
     formSubmitted,
     meetingHeld,
     purchased,
-    payments
+    paymentPlanCreated
   ] = await Promise.all([
     countEventsByType('contact_subscribed', startDate, endDate),
     countEventsByType('contact_created', startDate, endDate),
     countEventsByType('dm_qualified', startDate, endDate),
+    countEventsByType('link_sent', startDate, endDate),
     countEventsByType('link_clicked', startDate, endDate),
     countEventsByType('form_submitted', startDate, endDate),
-    countEventsByType('meeting_held', startDate, endDate),
+    countEventsByType('appointment_held', startDate, endDate),
     countEventsByType('purchase_completed', startDate, endDate),
-    supabase.from('payments').select('amount').gte('payment_date', startDate).lte('payment_date', endDateTime)
+    countEventsByType('payment_plan_created', startDate, endDate)
   ]);
+
+  // Revenue breakdown: Stripe = cash, Denefits = projected
+  const { data: stripePayments } = await supabase
+    .from('payments')
+    .select('amount')
+    .eq('payment_source', 'stripe')
+    .gte('payment_date', startDate)
+    .lte('payment_date', endDateTime);
+
+  const { data: denefitsPayments } = await supabase
+    .from('payments')
+    .select('amount, denefits_downpayment')
+    .eq('payment_source', 'denefits')
+    .gte('payment_date', startDate)
+    .lte('payment_date', endDateTime);
+
+  const cashCollected = stripePayments?.reduce((sum, p) => sum + parseFloat(p.amount || 0), 0) || 0;
+  const projectedRevenue = denefitsPayments?.reduce((sum, p) => sum + parseFloat(p.amount || 0), 0) || 0;
+  const depositsTotal = denefitsPayments?.reduce((sum, p) => sum + parseFloat(p.denefits_downpayment || 0), 0) || 0;
 
   return {
     leads: subscribedCount + createdCount,
-    qualified: qualified,
+    qualified,
+    link_sent: linkSent,
     link_clicked: linkClicked,
     form_submitted: formSubmitted,
     meeting_held: meetingHeld,
-    purchased: purchased,
-    revenue: payments.data?.reduce((sum, p) => sum + parseFloat(p.amount || 0), 0) || 0
+    purchased: purchased + paymentPlanCreated,
+    // Revenue breakdown
+    cashCollected,
+    projectedRevenue,
+    depositsTotal,
+    revenue: cashCollected + projectedRevenue
   };
 }
 
@@ -152,9 +178,11 @@ function generateRevenueChartUrl(weeks, weekData) {
 }
 
 function generateFunnelChartUrl(totals) {
+  // Correct funnel order: Lead → Qualified → Link Sent → Link Clicked → Form → Meeting → Purchase
   const stages = [
     { name: 'Leads', count: totals.leads },
-    { name: 'Qualified', count: totals.qualified },
+    { name: 'DM Qualified', count: totals.qualified },
+    { name: 'Link Sent', count: totals.link_sent || 0 },
     { name: 'Link Clicked', count: totals.link_clicked },
     { name: 'Form Submit', count: totals.form_submitted },
     { name: 'Meeting Held', count: totals.meeting_held },
@@ -167,7 +195,7 @@ function generateFunnelChartUrl(totals) {
       labels: stages.map(s => s.name),
       datasets: [{
         data: stages.map(s => s.count),
-        backgroundColor: ['#3b82f6', '#2563eb', '#0891b2', '#0d9488', '#059669', '#065f46']
+        backgroundColor: ['#3b82f6', '#2563eb', '#1d4ed8', '#0891b2', '#0d9488', '#059669', '#065f46']
       }]
     },
     options: {
@@ -208,10 +236,14 @@ async function main() {
   const totals = {
     leads: weekData.reduce((s, d) => s + d.leads, 0),
     qualified: weekData.reduce((s, d) => s + d.qualified, 0),
+    link_sent: weekData.reduce((s, d) => s + (d.link_sent || 0), 0),
     link_clicked: weekData.reduce((s, d) => s + d.link_clicked, 0),
     form_submitted: weekData.reduce((s, d) => s + d.form_submitted, 0),
     meeting_held: weekData.reduce((s, d) => s + d.meeting_held, 0),
     purchased: weekData.reduce((s, d) => s + d.purchased, 0),
+    cashCollected: weekData.reduce((s, d) => s + (d.cashCollected || 0), 0),
+    projectedRevenue: weekData.reduce((s, d) => s + (d.projectedRevenue || 0), 0),
+    depositsTotal: weekData.reduce((s, d) => s + (d.depositsTotal || 0), 0),
     revenue: weekData.reduce((s, d) => s + d.revenue, 0)
   };
 
@@ -262,12 +294,36 @@ async function main() {
                   <div style="font-size: 12px; color: #6b7280;">Total Leads</div>
                 </td>
                 <td style="text-align: center; padding: 8px;">
+                  <div style="font-size: 28px; font-weight: 700; color: #1e40af;">${totals.meeting_held}</div>
+                  <div style="font-size: 12px; color: #6b7280;">Meetings Held</div>
+                </td>
+                <td style="text-align: center; padding: 8px;">
                   <div style="font-size: 28px; font-weight: 700; color: #1e40af;">${totals.purchased}</div>
                   <div style="font-size: 12px; color: #6b7280;">Purchased</div>
                 </td>
+              </tr>
+            </table>
+          </div>
+
+          <!-- Revenue Breakdown -->
+          <div style="background: #ecfdf5; padding: 16px;">
+            <table style="width: 100%;">
+              <tr>
                 <td style="text-align: center; padding: 8px;">
-                  <div style="font-size: 28px; font-weight: 700; color: ${COLORS.success};">$${totals.revenue.toLocaleString()}</div>
-                  <div style="font-size: 12px; color: #6b7280;">Revenue</div>
+                  <div style="font-size: 24px; font-weight: 700; color: ${COLORS.success};">$${totals.cashCollected.toLocaleString()}</div>
+                  <div style="font-size: 11px; color: #6b7280;">Cash Collected</div>
+                </td>
+                <td style="text-align: center; padding: 8px;">
+                  <div style="font-size: 24px; font-weight: 700; color: #0891b2;">$${totals.projectedRevenue.toLocaleString()}</div>
+                  <div style="font-size: 11px; color: #6b7280;">Projected (BNPL)</div>
+                </td>
+                <td style="text-align: center; padding: 8px;">
+                  <div style="font-size: 24px; font-weight: 700; color: #7c3aed;">$${totals.depositsTotal.toLocaleString()}</div>
+                  <div style="font-size: 11px; color: #6b7280;">Deposits</div>
+                </td>
+                <td style="text-align: center; padding: 8px;">
+                  <div style="font-size: 24px; font-weight: 700; color: #1e40af;">$${totals.revenue.toLocaleString()}</div>
+                  <div style="font-size: 11px; color: #6b7280;">Total Revenue</div>
                 </td>
               </tr>
             </table>
