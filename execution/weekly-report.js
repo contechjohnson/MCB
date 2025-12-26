@@ -121,36 +121,62 @@ async function fetchWeekActivity(startDate, endDate) {
   // === REVENUE METRICS (from payments table) ===
   //
   // Cash Collected = actual money in bank
-  //   - Stripe payments (pay in full)
+  //   - Stripe full purchases
+  //   - Stripe $100 deposits
   //   - Denefits downpayments
-  //   - Denefits monthly installments (if any)
+  //   - Denefits monthly installments
   //
   // Projected Revenue = total value from efforts this period
-  //   - Stripe payments
-  //   - Denefits contract value (new contracts only, not monthly payments)
+  //   - Stripe full purchases
+  //   - Denefits contract value (new contracts only)
 
-  // Stripe payments (pay in full)
-  const { data: stripePayments } = await supabase
+  // Stripe full purchases
+  const { data: stripeFullPayments } = await supabase
     .from('payments')
     .select('amount')
     .eq('payment_source', 'stripe')
+    .eq('payment_category', 'full_purchase')
     .gte('payment_date', startDate)
     .lte('payment_date', endDateTime);
 
-  const stripeTotal = stripePayments?.reduce((sum, p) => sum + parseFloat(p.amount || 0), 0) || 0;
+  const stripeFullTotal = stripeFullPayments?.reduce((sum, p) => sum + parseFloat(p.amount || 0), 0) || 0;
+
+  // Stripe $100 deposits
+  const { data: stripeDeposits } = await supabase
+    .from('payments')
+    .select('amount')
+    .eq('payment_source', 'stripe')
+    .eq('payment_category', 'deposit')
+    .gte('payment_date', startDate)
+    .lte('payment_date', endDateTime);
+
+  const stripeDepositsTotal = stripeDeposits?.reduce((sum, p) => sum + parseFloat(p.amount || 0), 0) || 0;
+  const stripeDepositsCount = stripeDeposits?.length || 0;
+
+  // Total Stripe (for backward compatibility)
+  const stripeTotal = stripeFullTotal + stripeDepositsTotal;
 
   // Denefits contracts (new BNPL contracts)
   const { data: denefitsContracts } = await supabase
     .from('payments')
     .select('amount, denefits_downpayment')
     .eq('payment_source', 'denefits')
-    .eq('payment_type', 'buy_now_pay_later')
+    .eq('payment_category', 'payment_plan')
     .gte('payment_date', startDate)
     .lte('payment_date', endDateTime);
 
   const denefitsContractValue = denefitsContracts?.reduce((sum, p) => sum + parseFloat(p.amount || 0), 0) || 0;
-  const denefitsDownpayments = denefitsContracts?.reduce((sum, p) => sum + parseFloat(p.denefits_downpayment || 0), 0) || 0;
-  const depositCount = denefitsContracts?.filter(p => parseFloat(p.denefits_downpayment || 0) > 0).length || 0;
+
+  // Denefits downpayments (separate records with category='downpayment')
+  const { data: denefitsDownpaymentRecords } = await supabase
+    .from('payments')
+    .select('amount')
+    .eq('payment_source', 'denefits')
+    .eq('payment_category', 'downpayment')
+    .gte('payment_date', startDate)
+    .lte('payment_date', endDateTime);
+
+  const denefitsDownpayments = denefitsDownpaymentRecords?.reduce((sum, p) => sum + parseFloat(p.amount || 0), 0) || 0;
 
   // Denefits recurring payments (monthly installments toward existing contracts)
   const { data: denefitsRecurring } = await supabase
@@ -164,14 +190,11 @@ async function fetchWeekActivity(startDate, endDate) {
   const recurringPayments = denefitsRecurring?.reduce((sum, p) => sum + parseFloat(p.amount || 0), 0) || 0;
   const recurringCount = denefitsRecurring?.length || 0;
 
-  // CASH COLLECTED = Stripe + Denefits downpayments + recurring payments
+  // CASH COLLECTED = Stripe (full + deposits) + Denefits downpayments + recurring
   const cashCollected = stripeTotal + denefitsDownpayments + recurringPayments;
 
-  // PROJECTED REVENUE = Stripe + Denefits contract value (new contracts only)
-  const projectedRevenue = stripeTotal + denefitsContractValue;
-
-  // Deposits shown separately (subset of cash collected)
-  const depositsTotal = denefitsDownpayments;
+  // PROJECTED REVENUE = Stripe full purchases + Denefits contract value
+  const projectedRevenue = stripeFullTotal + denefitsContractValue;
 
   // Total payments for count
   const { data: allPayments } = await supabase
@@ -193,13 +216,15 @@ async function fetchWeekActivity(startDate, endDate) {
     meeting_held,
     purchased,
     // Revenue breakdown
-    cashCollected,        // Actual money in bank (Stripe + deposits + recurring)
-    projectedRevenue,     // Total value from efforts (Stripe + new BNPL contracts)
-    depositsTotal,        // Just the BNPL deposits (subset of cashCollected)
-    depositCount,
-    recurringPayments,    // BNPL recurring payments (monthly installments)
+    cashCollected,            // Actual money in bank (Stripe full + deposits + BNPL down + recurring)
+    projectedRevenue,         // Total value from efforts (Stripe full + BNPL contracts)
+    stripeFullTotal,          // Stripe full purchases only
+    stripeDepositsTotal,      // Stripe $100 deposits
+    stripeDepositsCount,      // Count of $100 deposits
+    stripeTotal,              // All Stripe (full + deposits)
+    denefitsDownpayments,     // BNPL downpayments
+    recurringPayments,        // BNPL recurring payments (monthly installments)
     recurringCount,
-    stripeTotal,          // Stripe payments
     // Total revenue = projected (value from this period's efforts)
     revenue: projectedRevenue,
     payment_count: allPayments?.length || 0
@@ -425,8 +450,8 @@ async function main() {
             <div style="margin-top: 12px; padding-top: 12px; border-top: 1px solid #d1fae5;">
               <table style="width: 100%; font-size: 12px; color: #6b7280;">
                 <tr>
-                  <td>Stripe: $${(activity.stripeTotal || 0).toLocaleString()}</td>
-                  <td style="text-align: center;">BNPL Deposits: $${(activity.depositsTotal || 0).toLocaleString()}</td>
+                  <td>Stripe: $${(activity.stripeFullTotal || 0).toLocaleString()}</td>
+                  <td style="text-align: center;">$100 Deposits: $${(activity.stripeDepositsTotal || 0).toLocaleString()} (${activity.stripeDepositsCount || 0})</td>
                   <td style="text-align: right;">BNPL Recurring: $${(activity.recurringPayments || 0).toLocaleString()}</td>
                 </tr>
               </table>

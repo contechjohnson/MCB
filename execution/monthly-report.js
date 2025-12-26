@@ -101,35 +101,62 @@ async function fetchWeekActivity(startDate, endDate) {
   // === REVENUE METRICS ===
   //
   // Cash Collected = actual money in bank
-  //   - Stripe payments (pay in full)
+  //   - Stripe full purchases
+  //   - Stripe $100 deposits
   //   - Denefits downpayments
   //   - Denefits monthly installments
   //
   // Projected Revenue = total value from efforts this period
-  //   - Stripe payments
+  //   - Stripe full purchases
   //   - Denefits contract value (new contracts only)
 
-  // Stripe payments
-  const { data: stripePayments } = await supabase
+  // Stripe full purchases
+  const { data: stripeFullPayments } = await supabase
     .from('payments')
     .select('amount')
     .eq('payment_source', 'stripe')
+    .eq('payment_category', 'full_purchase')
     .gte('payment_date', startDate)
     .lte('payment_date', endDateTime);
 
-  const stripeTotal = stripePayments?.reduce((sum, p) => sum + parseFloat(p.amount || 0), 0) || 0;
+  const stripeFullTotal = stripeFullPayments?.reduce((sum, p) => sum + parseFloat(p.amount || 0), 0) || 0;
 
-  // Denefits new contracts (BNPL)
+  // Stripe $100 deposits
+  const { data: stripeDeposits } = await supabase
+    .from('payments')
+    .select('amount')
+    .eq('payment_source', 'stripe')
+    .eq('payment_category', 'deposit')
+    .gte('payment_date', startDate)
+    .lte('payment_date', endDateTime);
+
+  const stripeDepositsTotal = stripeDeposits?.reduce((sum, p) => sum + parseFloat(p.amount || 0), 0) || 0;
+  const stripeDepositsCount = stripeDeposits?.length || 0;
+
+  // Total Stripe (for backward compatibility)
+  const stripeTotal = stripeFullTotal + stripeDepositsTotal;
+
+  // Denefits new contracts (payment_plan category)
   const { data: denefitsContracts } = await supabase
     .from('payments')
-    .select('amount, denefits_downpayment')
+    .select('amount')
     .eq('payment_source', 'denefits')
-    .eq('payment_type', 'buy_now_pay_later')
+    .eq('payment_category', 'payment_plan')
     .gte('payment_date', startDate)
     .lte('payment_date', endDateTime);
 
   const denefitsContractValue = denefitsContracts?.reduce((sum, p) => sum + parseFloat(p.amount || 0), 0) || 0;
-  const denefitsDownpayments = denefitsContracts?.reduce((sum, p) => sum + parseFloat(p.denefits_downpayment || 0), 0) || 0;
+
+  // Denefits downpayments (separate records with category='downpayment')
+  const { data: denefitsDownpaymentRecords } = await supabase
+    .from('payments')
+    .select('amount')
+    .eq('payment_source', 'denefits')
+    .eq('payment_category', 'downpayment')
+    .gte('payment_date', startDate)
+    .lte('payment_date', endDateTime);
+
+  const denefitsDownpayments = denefitsDownpaymentRecords?.reduce((sum, p) => sum + parseFloat(p.amount || 0), 0) || 0;
 
   // Denefits recurring payments (monthly installments toward existing contracts)
   const { data: denefitsRecurring } = await supabase
@@ -142,14 +169,11 @@ async function fetchWeekActivity(startDate, endDate) {
 
   const recurringPayments = denefitsRecurring?.reduce((sum, p) => sum + parseFloat(p.amount || 0), 0) || 0;
 
-  // CASH COLLECTED = Stripe + Denefits downpayments + recurring payments
+  // CASH COLLECTED = Stripe (full + deposits) + Denefits downpayments + recurring
   const cashCollected = stripeTotal + denefitsDownpayments + recurringPayments;
 
-  // PROJECTED REVENUE = Stripe + Denefits contract value (new contracts only)
-  const projectedRevenue = stripeTotal + denefitsContractValue;
-
-  // Deposits shown separately
-  const depositsTotal = denefitsDownpayments;
+  // PROJECTED REVENUE = Stripe full purchases + Denefits contract value
+  const projectedRevenue = stripeFullTotal + denefitsContractValue;
 
   return {
     leads: subscribedCount + createdCount,
@@ -160,11 +184,14 @@ async function fetchWeekActivity(startDate, endDate) {
     meeting_held: meetingHeld,
     purchased: purchased + paymentPlanCreated,
     // Revenue breakdown
-    cashCollected,        // Actual money in bank
-    projectedRevenue,     // Total value from efforts
-    depositsTotal,        // BNPL deposits (subset of cashCollected)
-    recurringPayments,    // BNPL recurring payments (monthly installments)
-    stripeTotal,          // Stripe payments
+    cashCollected,            // Actual money in bank (Stripe full + deposits + BNPL down + recurring)
+    projectedRevenue,         // Total value from efforts (Stripe full + BNPL contracts)
+    stripeFullTotal,          // Stripe full purchases only
+    stripeDepositsTotal,      // Stripe $100 deposits
+    stripeDepositsCount,      // Count of $100 deposits
+    stripeTotal,              // All Stripe (full + deposits)
+    denefitsDownpayments,     // BNPL downpayments
+    recurringPayments,        // BNPL recurring payments (monthly installments)
     // Total revenue = projected (value from this period's efforts)
     revenue: projectedRevenue
   };
@@ -280,9 +307,12 @@ async function main() {
     purchased: weekData.reduce((s, d) => s + d.purchased, 0),
     cashCollected: weekData.reduce((s, d) => s + (d.cashCollected || 0), 0),
     projectedRevenue: weekData.reduce((s, d) => s + (d.projectedRevenue || 0), 0),
-    depositsTotal: weekData.reduce((s, d) => s + (d.depositsTotal || 0), 0),
-    recurringPayments: weekData.reduce((s, d) => s + (d.recurringPayments || 0), 0),
+    stripeFullTotal: weekData.reduce((s, d) => s + (d.stripeFullTotal || 0), 0),
+    stripeDepositsTotal: weekData.reduce((s, d) => s + (d.stripeDepositsTotal || 0), 0),
+    stripeDepositsCount: weekData.reduce((s, d) => s + (d.stripeDepositsCount || 0), 0),
     stripeTotal: weekData.reduce((s, d) => s + (d.stripeTotal || 0), 0),
+    denefitsDownpayments: weekData.reduce((s, d) => s + (d.denefitsDownpayments || 0), 0),
+    recurringPayments: weekData.reduce((s, d) => s + (d.recurringPayments || 0), 0),
     revenue: weekData.reduce((s, d) => s + d.revenue, 0)
   };
 
@@ -361,8 +391,8 @@ async function main() {
             <div style="margin-top: 12px; padding-top: 12px; border-top: 1px solid #d1fae5;">
               <table style="width: 100%; font-size: 12px; color: #6b7280;">
                 <tr>
-                  <td>Stripe: $${(totals.stripeTotal || 0).toLocaleString()}</td>
-                  <td style="text-align: center;">BNPL Deposits: $${(totals.depositsTotal || 0).toLocaleString()}</td>
+                  <td>Stripe: $${(totals.stripeFullTotal || 0).toLocaleString()}</td>
+                  <td style="text-align: center;">$100 Deposits: $${(totals.stripeDepositsTotal || 0).toLocaleString()} (${totals.stripeDepositsCount || 0})</td>
                   <td style="text-align: right;">BNPL Recurring: $${(totals.recurringPayments || 0).toLocaleString()}</td>
                 </tr>
               </table>

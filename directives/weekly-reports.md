@@ -45,9 +45,10 @@
 **What it shows:**
 - This week's funnel (7 stages, horizontal bar chart)
 - Key metrics: Leads, Meeting Held, Purchased
-- Revenue breakdown: Cash Collected, Projected (BNPL), Deposits, Total
+- Revenue breakdown: Cash Collected, Projected Revenue
+- Revenue detail: Stripe (full), $100 Deposits (count), BNPL Recurring
 - Ad spend, CPL, CPA, ROAS
-- Top 3 performing ads (by calls booked)
+- Top 3 performing ads (by meetings held)
 
 **Schedule:** Every Thursday at 5 PM EST
 **Cron:** `0 22 * * 4` (10 PM UTC = 5 PM EST)
@@ -57,7 +58,8 @@
 ## Monthly Report (4-Week Overview)
 
 **What it shows:**
-- Revenue breakdown: Cash Collected, Projected (BNPL), Deposits, Total
+- Revenue breakdown: Cash Collected, Projected Revenue
+- Revenue detail: Stripe (full), $100 Deposits (count), BNPL Recurring
 - Revenue trend chart (4 weeks)
 - Funnel chart (7 stages, 4-week totals)
 - Week-by-week breakdown table
@@ -90,11 +92,22 @@ Event types:
 - **Purchased:** `purchase_completed` OR `payment_plan_created`
 
 ### Revenue Breakdown
-Three revenue metrics from `payments` table:
-- **Cash Collected:** Stripe payments (`payment_source = 'stripe'`)
-- **Projected Revenue:** Denefits payment plans (`payment_source = 'denefits'`)
-- **Deposits:** Denefits downpayments (`denefits_downpayment` column)
-- **Total Revenue:** Cash + Projected
+Revenue metrics from `payments` table using `payment_category`:
+
+**Cash Collected** = Actual money in bank:
+- Stripe full purchases (`payment_category = 'full_purchase'`)
+- Stripe $100 deposits (`payment_category = 'deposit'`)
+- Denefits downpayments (`payment_category = 'downpayment'`)
+- Denefits recurring (`payment_category = 'recurring'`)
+
+**Projected Revenue** = Total value from this period's efforts:
+- Stripe full purchases (`payment_category = 'full_purchase'`)
+- Denefits contract value (`payment_category = 'payment_plan'`)
+
+**Email breakdown row shows:**
+- Stripe (full purchases only)
+- $100 Deposits (Stripe deposit count and total)
+- BNPL Recurring (Denefits monthly installments)
 
 ### Ad Metrics
 - **Ad Spend:** From `meta_ad_insights` table (7-day rolling spend)
@@ -172,6 +185,8 @@ This removes 537 imported historical contacts.
 | 2025-12-25 | `meeting_held` not in event constraint | Changed to `appointment_held` |
 | 2025-12-25 | Funnel chart out of order, missing link_sent | Fixed order: Lead → Qualified → Link Sent → Clicked → Form → Meeting → Purchase |
 | 2025-12-25 | `payment_category` null for all payments | Query by `payment_source` (stripe/denefits) instead |
+| 2025-12-25 | Gmail collapsing email sections | `...` in ad names (e.g., "Ad ...500065") triggered Gmail's quoted content detection. Fixed by using "Ad #500065" |
+| 2025-12-25 | Revenue breakdown needed Stripe deposits | Separated queries: Stripe full purchases vs $100 deposits. Email shows "$100 Deposits: $X (count)" instead of BNPL deposits |
 
 ### Key Learning
 
