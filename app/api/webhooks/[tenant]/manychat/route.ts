@@ -24,19 +24,25 @@ const MANYCHAT_API_URL = 'https://api.manychat.com/fb/subscriber';
  */
 export async function POST(
   request: NextRequest,
-  { params }: { params: { tenant: string } }
+  { params }: { params: Promise<{ tenant: string }> }
 ) {
-  const tenantSlug = params.tenant;
+  const { tenant: tenantSlug } = await params;
+
+  // Declare variables outside try block for error handling access
+  let tenant: Awaited<ReturnType<typeof getTenantContext>> = null;
+  let body: any = null;
+  let subscriberId: string | null = null;
+  let eventType: string | null = null;
 
   try {
     // Get tenant context
-    const tenant = await getTenantContext(tenantSlug);
+    tenant = await getTenantContext(tenantSlug);
     if (!tenant) {
       console.error('Unknown tenant:', tenantSlug);
       return NextResponse.json({ error: 'Unknown tenant' }, { status: 404 });
     }
 
-    let body = await request.json();
+    body = await request.json();
 
     // Handle array payload (ManyChat sometimes sends array)
     if (Array.isArray(body) && body.length > 0) {
@@ -51,8 +57,6 @@ export async function POST(
     });
 
     // Extract data - handle both formats
-    let subscriberId: string | null = null;
-    let eventType: string | null = null;
     let manychatData: any = null;
 
     if (body.subscriber) {
@@ -130,13 +134,29 @@ export async function POST(
 
     const standardEventType = eventType ? eventTypeMap[eventType] || null : null;
 
-    // Update contact AND create event (dual-write)
+    // Build tags from ManyChat custom fields
+    const customFields = manychatData.custom_fields || {};
+    const tags: Record<string, any> = {};
+
+    // Chatbot variant (A/B testing)
+    const chatbotVariant = customFields.chatbot_AB || customFields['Chatbot AB Test'];
+    if (chatbotVariant) {
+      tags.chatbot = chatbotVariant;
+    }
+
+    // Source tag if available
+    if (customFields.source || customFields.Source) {
+      tags.source = customFields.source || customFields.Source;
+    }
+
+    // Update contact AND create event
     const { error: updateError } = await supabaseAdmin.rpc('update_contact_with_event', {
       p_contact_id: contactId,
       p_update_data: updateData,
       p_event_type: standardEventType,
       p_source: 'manychat',
       p_source_event_id: standardEventType ? `mc_${subscriberId}_${Date.now()}` : null,
+      p_tags: Object.keys(tags).length > 0 ? tags : null,
     });
 
     console.log(`[${tenantSlug}] RPC completed, error=${!!updateError}`);
@@ -202,12 +222,13 @@ export async function POST(
  */
 export async function GET(
   request: NextRequest,
-  { params }: { params: { tenant: string } }
+  { params }: { params: Promise<{ tenant: string }> }
 ) {
-  const tenant = await getTenantContext(params.tenant);
+  const { tenant: tenantSlug } = await params;
+  const tenant = await getTenantContext(tenantSlug);
   return NextResponse.json({
     status: 'ok',
-    tenant: params.tenant,
+    tenant: tenantSlug,
     tenant_name: tenant?.name || 'Unknown',
     message: 'ManyChat webhook endpoint is live',
     events: ['contact_created', 'dm_qualified', 'link_sent', 'link_clicked'],
@@ -275,13 +296,12 @@ async function findOrCreateContact(tenantId: string, subscriberId: string): Prom
     return existing.id;
   }
 
-  // Create new contact
+  // Create new contact (events-first: no date columns, just identity + stage)
   const { data: newContact, error } = await supabaseAdmin
     .from('contacts')
     .insert({
       tenant_id: tenantId,
       mc_id: subscriberId,
-      subscribe_date: new Date().toISOString(),
       stage: 'new_lead',
       source: 'instagram',
     })
@@ -297,10 +317,16 @@ async function findOrCreateContact(tenantId: string, subscriberId: string): Prom
 
 /**
  * Build update data based on event type and ManyChat data
+ *
+ * EVENTS-FIRST ARCHITECTURE:
+ * - Only update identity fields + current stage on contacts
+ * - All date/history tracking is done via funnel_events table
+ * - Metadata like chatbot variant, thread_id go into tags JSONB
  */
 function buildUpdateData(eventType: string | null, manychatData: any) {
   const customFields = manychatData.custom_fields || {};
 
+  // Only fields that exist in the contacts table (20 columns)
   const baseData: any = {
     first_name: manychatData.first_name || null,
     last_name: manychatData.last_name || null,
@@ -314,73 +340,25 @@ function buildUpdateData(eventType: string | null, manychatData: any) {
     ig_id: manychatData.ig_id || null,
     fb: manychatData.name || null,
     ad_id: customFields.AD_ID || customFields.ADID || null,
-    chatbot_ab: customFields.chatbot_AB || customFields['Chatbot AB Test'] || null,
-    thread_id: customFields.thread_id || customFields['Conversation ID'] || null,
-    trigger_word: customFields.trigger_word || customFields['All Tags'] || null,
-    subscribed: manychatData.subscribed || null,
-    ig_last_interaction: manychatData.ig_last_interaction || null,
     source: customFields.source || customFields.Source || 'instagram',
     updated_at: new Date().toISOString(),
   };
 
-  const questionFields: any = {
-    q1_question: customFields.Symptoms || null,
-    q2_question: customFields['Months Postpartum'] || customFields['How Far Postpartum'] || null,
-    objections: customFields.Objections || null,
-  };
-
-  const dateFields: any = {};
-  if (customFields.DATE_LINK_SENT) dateFields.link_send_date = customFields.DATE_LINK_SENT;
-  if (customFields.DATE_LINK_CLICKED) dateFields.link_click_date = customFields.DATE_LINK_CLICKED;
-  if (customFields.DATE_FORM_FILLED) dateFields.form_submit_date = customFields.DATE_FORM_FILLED;
-  if (customFields.DATE_DM_QUALIFIED) dateFields.dm_qualified_date = customFields.DATE_DM_QUALIFIED;
-  if (customFields.DATE_MEETING_BOOKED) dateFields.appointment_date = customFields.DATE_MEETING_BOOKED;
-  if (customFields.DATE_MEETING_HELD) dateFields.appointment_held_date = customFields.DATE_MEETING_HELD;
-
+  // Stage progression based on event type
   switch (eventType) {
     case 'contact_created':
-      return {
-        ...baseData,
-        ...questionFields,
-        ...dateFields,
-        subscribe_date: new Date().toISOString(),
-        stage: 'new_lead',
-      };
+      return { ...baseData, stage: 'new_lead' };
 
     case 'dm_qualified':
-      return {
-        ...baseData,
-        ...questionFields,
-        ...dateFields,
-        lead_summary: customFields['Cody > Response'] || null,
-        dm_qualified_date: new Date().toISOString(),
-        stage: 'dm_qualified',
-      };
+      return { ...baseData, stage: 'dm_qualified' };
 
     case 'link_sent':
-      return {
-        ...baseData,
-        ...questionFields,
-        ...dateFields,
-        link_send_date: new Date().toISOString(),
-        stage: 'landing_link_sent',
-      };
+      return { ...baseData, stage: 'landing_link_sent' };
 
     case 'link_clicked':
-      return {
-        ...baseData,
-        ...questionFields,
-        ...dateFields,
-        link_click_date: new Date().toISOString(),
-        stage: 'landing_link_clicked',
-      };
+      return { ...baseData, stage: 'landing_link_clicked' };
 
     default:
-      return {
-        ...baseData,
-        ...questionFields,
-        ...dateFields,
-        lead_summary: customFields['Cody > Response'] || null,
-      };
+      return baseData;
   }
 }

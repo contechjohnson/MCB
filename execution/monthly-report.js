@@ -54,26 +54,55 @@ function getTrailing4Weeks() {
   return weeks.reverse();
 }
 
+/**
+ * Count distinct contacts with a specific event type in date range
+ * Uses funnel_events table (events-first architecture)
+ */
+async function countEventsByType(eventType, startDate, endDate) {
+  const endDateTime = endDate + 'T23:59:59';
+  const { data } = await supabase
+    .from('funnel_events')
+    .select('contact_id')
+    .eq('event_type', eventType)
+    .gte('event_timestamp', startDate)
+    .lte('event_timestamp', endDateTime);
+
+  // Return unique contact count
+  const uniqueContacts = [...new Set(data?.map(e => e.contact_id) || [])];
+  return uniqueContacts.length;
+}
+
 async function fetchWeekActivity(startDate, endDate) {
   const endDateTime = endDate + 'T23:59:59';
 
-  const [leads, qualified, linkClicked, formSubmitted, meetingHeld, purchased, payments] = await Promise.all([
-    supabase.from('contacts').select('id').neq('source', 'instagram_historical').gte('subscribe_date', startDate).lte('subscribe_date', endDateTime),
-    supabase.from('contacts').select('id').neq('source', 'instagram_historical').gte('dm_qualified_date', startDate).lte('dm_qualified_date', endDateTime),
-    supabase.from('contacts').select('id').neq('source', 'instagram_historical').gte('link_click_date', startDate).lte('link_click_date', endDateTime),
-    supabase.from('contacts').select('id').neq('source', 'instagram_historical').gte('form_submit_date', startDate).lte('form_submit_date', endDateTime),
-    supabase.from('contacts').select('id').neq('source', 'instagram_historical').gte('appointment_held_date', startDate).lte('appointment_held_date', endDateTime),
-    supabase.from('contacts').select('id').neq('source', 'instagram_historical').gte('purchase_date', startDate).lte('purchase_date', endDateTime),
+  // Events-first: Query funnel_events table instead of deprecated contact columns
+  const [
+    subscribedCount,
+    createdCount,
+    qualified,
+    linkClicked,
+    formSubmitted,
+    meetingHeld,
+    purchased,
+    payments
+  ] = await Promise.all([
+    countEventsByType('contact_subscribed', startDate, endDate),
+    countEventsByType('contact_created', startDate, endDate),
+    countEventsByType('dm_qualified', startDate, endDate),
+    countEventsByType('link_clicked', startDate, endDate),
+    countEventsByType('form_submitted', startDate, endDate),
+    countEventsByType('meeting_held', startDate, endDate),
+    countEventsByType('purchase_completed', startDate, endDate),
     supabase.from('payments').select('amount').gte('payment_date', startDate).lte('payment_date', endDateTime)
   ]);
 
   return {
-    leads: leads.data?.length || 0,
-    qualified: qualified.data?.length || 0,
-    link_clicked: linkClicked.data?.length || 0,
-    form_submitted: formSubmitted.data?.length || 0,
-    meeting_held: meetingHeld.data?.length || 0,
-    purchased: purchased.data?.length || 0,
+    leads: subscribedCount + createdCount,
+    qualified: qualified,
+    link_clicked: linkClicked,
+    form_submitted: formSubmitted,
+    meeting_held: meetingHeld,
+    purchased: purchased,
     revenue: payments.data?.reduce((sum, p) => sum + parseFloat(p.amount || 0), 0) || 0
   };
 }

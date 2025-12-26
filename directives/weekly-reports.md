@@ -17,15 +17,15 @@
 | Weekly | Every Thursday 5 PM EST | Single week snapshot | `weekly-report.js` |
 | Monthly | 1st of month 9 AM EST | 4-week overview | `monthly-report.js` |
 
-**Funnel Stages (in order):**
-1. Leads (subscribe_date)
-2. Qualified (dm_qualified_date)
-3. Link Clicked (link_click_date)
-4. Form Submitted (form_submit_date)
-5. Meeting Held (appointment_held_date)
-6. Purchased (purchase_date)
+**Funnel Stages (from funnel_events):**
+1. Leads (`contact_subscribed` + `contact_created` events)
+2. Qualified (`dm_qualified` event)
+3. Link Clicked (`link_clicked` event)
+4. Form Submitted (`form_submitted` event)
+5. Meeting Held (`meeting_held` event)
+6. Purchased (`purchase_completed` event)
 
-**Note:** We do NOT track "Meeting Booked" - only "Meeting Held" matters.
+**Architecture:** Events-first (Dec 2025) - queries `funnel_events` table, NOT contact date columns.
 
 ---
 
@@ -68,14 +68,22 @@
 
 ## How Metrics Are Calculated
 
-### Funnel (Activity-Based)
-Each metric counts events that happened in the date range:
-- **Leads:** `subscribe_date` in range
-- **Qualified:** `dm_qualified_date` in range
-- **Link Clicked:** `link_click_date` in range
-- **Form Submitted:** `form_submit_date` in range
-- **Meeting Held:** `appointment_held_date` in range
-- **Purchased:** `purchase_date` in range
+### Funnel (Events-First Architecture)
+Each metric counts DISTINCT contacts with that event in the date range:
+```sql
+SELECT COUNT(DISTINCT contact_id)
+FROM funnel_events
+WHERE event_type = 'form_submitted'
+  AND event_timestamp BETWEEN start_date AND end_date
+```
+
+Event types:
+- **Leads:** `contact_subscribed` OR `contact_created`
+- **Qualified:** `dm_qualified`
+- **Link Clicked:** `link_clicked`
+- **Form Submitted:** `form_submitted`
+- **Meeting Held:** `meeting_held`
+- **Purchased:** `purchase_completed`
 
 ### Revenue
 Sum of `payments.amount` where `payment_date` in range.

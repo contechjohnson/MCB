@@ -19,15 +19,20 @@ import {
  * Example: POST /api/webhooks/ppcu/denefits
  *
  * Events:
- * - contract.created: New BNPL contract
- * - contract.payments.recurring_payment: Monthly payment
- * - contract.status: Contract status change
+ * - contract.created: New BNPL contract (payment_plan + downpayment)
+ * - contract.payments.recurring_payment: Monthly payment (recurring)
+ * - contract.status: Contract status change (logged only)
+ *
+ * Payment Categories:
+ * - payment_plan: Total financed amount (projected revenue)
+ * - downpayment: Initial downpayment (cash collected)
+ * - recurring: Monthly installment (cash collected)
  */
 export async function POST(
   request: NextRequest,
-  { params }: { params: { tenant: string } }
+  { params }: { params: Promise<{ tenant: string }> }
 ) {
-  const tenantSlug = params.tenant;
+  const { tenant: tenantSlug } = await params;
 
   try {
     // Get tenant context
@@ -85,54 +90,56 @@ export async function POST(
     if (webhookType === 'contract.payments.recurring_payment') {
       console.log(`Recurring payment for contract ${contractCode}`);
 
-      // Check if payment already exists
-      const { data: existingPayment } = await supabaseAdmin
-        .from('payments')
-        .select('id')
-        .eq('tenant_id', tenant.id)
-        .eq('denefits_contract_code', contractCode)
-        .single();
+      // Create individual recurring payment record (cash collected)
+      const recurringPaymentId = `${contractCode}_recurring_${Date.now()}`;
+      await supabaseAdmin.from('payments').insert({
+        tenant_id: tenant.id,
+        contact_id: contactId || null,
+        payment_event_id: recurringPaymentId,
+        payment_source: 'denefits',
+        payment_type: 'buy_now_pay_later',
+        payment_category: 'recurring',
+        customer_email: email,
+        customer_name: `${contract.customer_first_name || ''} ${contract.customer_last_name || ''}`.trim() || null,
+        customer_phone: contract.customer_mobile || null,
+        amount: recurringAmount,
+        currency: 'usd',
+        status: 'paid',
+        payment_date: new Date().toISOString(),
+        denefits_contract_id: contractId,
+        denefits_contract_code: contractCode,
+        denefits_recurring_amount: recurringAmount,
+        denefits_remaining_payments: remainingPayments,
+        raw_payload: body,
+      });
+      paymentCreated = true;
+      console.log(`  ✅ Recurring payment $${recurringAmount} recorded for contract ${contractCode}`);
 
-      if (!existingPayment) {
-        // Create payment if missing
-        await supabaseAdmin.from('payments').insert({
-          tenant_id: tenant.id,
-          contact_id: contactId || null,
-          payment_event_id: contractCode || `denefits_${contractId}`,
-          payment_source: 'denefits',
-          payment_type: 'buy_now_pay_later',
-          customer_email: email,
-          customer_name: `${contract.customer_first_name || ''} ${contract.customer_last_name || ''}`.trim() || null,
-          customer_phone: contract.customer_mobile || null,
-          amount: financedAmount,
-          currency: 'usd',
-          status: 'active',
-          payment_date: contractCreatedDate,
-          denefits_contract_id: contractId,
-          denefits_contract_code: contractCode,
-          denefits_financed_amount: financedAmount,
-          denefits_downpayment: downpayment,
-          denefits_recurring_amount: recurringAmount,
-          denefits_num_payments: numPayments,
-          denefits_remaining_payments: remainingPayments,
-          raw_payload: body,
+      // Create recurring_payment_received event if contact exists
+      if (contactId) {
+        await supabaseAdmin.rpc('update_contact_with_event', {
+          p_contact_id: contactId,
+          p_update_data: {},
+          p_event_type: 'recurring_payment_received',
+          p_source: 'denefits',
+          p_source_event_id: recurringPaymentId,
         });
-        paymentCreated = true;
-        console.log(`  ✅ Payment created from recurring webhook`);
       }
     } else if (webhookType === 'contract.status') {
       const statusChange = body.status_change || {};
       console.log(`Contract status changed: ${contractCode}`);
       console.log(`  Previous: ${statusChange.previous_status}, Current: ${statusChange.current_status}`);
     } else if (webhookType === 'contract.created') {
-      console.log(`Creating payment record for contract ${contractCode}`);
+      console.log(`Creating payment records for contract ${contractCode}`);
 
+      // 1. Create payment_plan record (projected revenue - total financed amount)
       await supabaseAdmin.from('payments').insert({
         tenant_id: tenant.id,
         contact_id: contactId || null,
-        payment_event_id: contractCode || `denefits_${contractId}`,
+        payment_event_id: `${contractCode}_plan`,
         payment_source: 'denefits',
         payment_type: 'buy_now_pay_later',
+        payment_category: 'payment_plan',
         customer_email: email,
         customer_name: `${contract.customer_first_name || ''} ${contract.customer_last_name || ''}`.trim() || null,
         customer_phone: contract.customer_mobile || null,
@@ -149,6 +156,31 @@ export async function POST(
         denefits_remaining_payments: remainingPayments,
         raw_payload: body,
       });
+      console.log(`  ✅ Payment plan $${financedAmount} recorded (projected revenue)`);
+
+      // 2. Create downpayment record if downpayment > 0 (cash collected)
+      if (downpayment > 0) {
+        await supabaseAdmin.from('payments').insert({
+          tenant_id: tenant.id,
+          contact_id: contactId || null,
+          payment_event_id: `${contractCode}_downpayment`,
+          payment_source: 'denefits',
+          payment_type: 'buy_now_pay_later',
+          payment_category: 'downpayment',
+          customer_email: email,
+          customer_name: `${contract.customer_first_name || ''} ${contract.customer_last_name || ''}`.trim() || null,
+          customer_phone: contract.customer_mobile || null,
+          amount: downpayment,
+          currency: 'usd',
+          status: 'paid',
+          payment_date: contractCreatedDate,
+          denefits_contract_id: contractId,
+          denefits_contract_code: contractCode,
+          raw_payload: body,
+        });
+        console.log(`  ✅ Downpayment $${downpayment} recorded (cash collected)`);
+      }
+
       paymentCreated = true;
     }
 
@@ -164,34 +196,19 @@ export async function POST(
       return webhookSuccess({ orphan: true, tenant: tenantSlug });
     }
 
-    // Update contact if payment was created
-    const { data: existingContact } = await supabaseAdmin
-      .from('contacts')
-      .select('purchase_date, purchase_amount')
-      .eq('id', contactId)
-      .single();
-
-    const shouldUpdate = paymentCreated || !existingContact?.purchase_date;
-
-    if (shouldUpdate) {
-      const { data: totalPurchases } = await supabaseAdmin
-        .from('payments')
-        .select('amount')
-        .eq('tenant_id', tenant.id)
-        .eq('contact_id', contactId)
-        .in('status', ['paid', 'active']);
-
-      const totalAmount = totalPurchases?.reduce((sum, p) => sum + Number(p.amount), 0) || financedAmount;
+    // Update contact if payment was created (events-first: no deprecated date/amount columns)
+    if (paymentCreated) {
+      // Determine event type based on webhook type
+      const eventType = webhookType === 'contract.created' ? 'payment_plan_created' : 'purchase_completed';
 
       await supabaseAdmin.rpc('update_contact_with_event', {
         p_contact_id: contactId,
         p_update_data: {
           email_payment: email,
-          purchase_date: existingContact?.purchase_date || contractCreatedDate,
-          purchase_amount: totalAmount,
           stage: 'purchased',
+          updated_at: new Date().toISOString(),
         },
-        p_event_type: 'purchase_completed',
+        p_event_type: eventType,
         p_source: 'denefits',
         p_source_event_id: contractCode || `denefits_${contractId}`,
       });
@@ -256,7 +273,7 @@ export async function POST(
       contact_id: contactId,
       event_type: webhookType,
       tenant: tenantSlug,
-      updated: shouldUpdate,
+      updated: paymentCreated,
     });
   } catch (error) {
     console.error(`[${tenantSlug}] Denefits webhook error:`, error);
@@ -272,12 +289,13 @@ export async function POST(
  */
 export async function GET(
   request: NextRequest,
-  { params }: { params: { tenant: string } }
+  { params }: { params: Promise<{ tenant: string }> }
 ) {
-  const tenant = await getTenantContext(params.tenant);
+  const { tenant: tenantSlug } = await params;
+  const tenant = await getTenantContext(tenantSlug);
   return NextResponse.json({
     status: 'ok',
-    tenant: params.tenant,
+    tenant: tenantSlug,
     tenant_name: tenant?.name || 'Unknown',
     message: 'Denefits webhook endpoint is live (via Make.com)',
     events: ['contract.created', 'contract.payments.recurring_payment', 'contract.status'],

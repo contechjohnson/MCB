@@ -28,9 +28,9 @@ import {
  */
 export async function POST(
   request: NextRequest,
-  { params }: { params: { tenant: string } }
+  { params }: { params: Promise<{ tenant: string }> }
 ) {
-  const tenantSlug = params.tenant;
+  const { tenant: tenantSlug } = await params;
 
   try {
     // Get tenant context
@@ -125,12 +125,13 @@ export async function POST(
  */
 export async function GET(
   request: NextRequest,
-  { params }: { params: { tenant: string } }
+  { params }: { params: Promise<{ tenant: string }> }
 ) {
-  const tenant = await getTenantContext(params.tenant);
+  const { tenant: tenantSlug } = await params;
+  const tenant = await getTenantContext(tenantSlug);
   return NextResponse.json({
     status: 'ok',
-    tenant: params.tenant,
+    tenant: tenantSlug,
     tenant_name: tenant?.name || 'Unknown',
     message: 'Stripe webhook endpoint is live',
     events: ['checkout.session.created', 'checkout.session.completed', 'checkout.session.expired', 'charge.refunded'],
@@ -197,7 +198,7 @@ async function handleCheckoutCreated(tenantId: string, event: Stripe.Event) {
     p_update_data: { checkout_started: new Date().toISOString() },
     p_event_type: 'checkout_started',
     p_source: 'stripe',
-    p_source_event_id: `stripe_checkout_${sessionId}`,
+    p_source_event_id: `stripe_checkout_${session.id}`,
   });
 
   console.log(`Checkout started for contact ${contact.id}`);
@@ -205,6 +206,11 @@ async function handleCheckoutCreated(tenantId: string, event: Stripe.Event) {
 
 /**
  * Handle successful checkout
+ *
+ * Payment categorization:
+ * - $100 exactly → deposit (high intent, stage = deposit_paid)
+ * - >$100 → full_purchase (stage = purchased)
+ * - <$100 → miscellaneous (logged only, no contact update)
  */
 async function handleCheckoutCompleted(tenant: TenantContext, event: Stripe.Event) {
   const tenantId = tenant.id;
@@ -212,6 +218,16 @@ async function handleCheckoutCompleted(tenant: TenantContext, event: Stripe.Even
   const email = (session.customer_email || session.customer_details?.email)?.toLowerCase().trim();
   const amount = session.amount_total ? session.amount_total / 100 : 0;
   const customerId = session.customer as string;
+
+  // Determine payment category based on amount
+  let paymentCategory: 'deposit' | 'full_purchase' | 'miscellaneous';
+  if (amount === 100) {
+    paymentCategory = 'deposit';
+  } else if (amount > 100) {
+    paymentCategory = 'full_purchase';
+  } else {
+    paymentCategory = 'miscellaneous';
+  }
 
   // Always log the payment, even without email
   const contactId = email ? await findContactWithRetry(tenantId, email) : null;
@@ -222,6 +238,7 @@ async function handleCheckoutCompleted(tenant: TenantContext, event: Stripe.Even
     payment_event_id: event.id,
     payment_source: 'stripe',
     payment_type: 'buy_in_full',
+    payment_category: paymentCategory,
     customer_email: email || null,
     customer_name: session.customer_details?.name || null,
     customer_phone: session.customer_details?.phone || null,
@@ -236,35 +253,59 @@ async function handleCheckoutCompleted(tenant: TenantContext, event: Stripe.Even
   });
 
   if (!contactId) {
-    console.warn('Payment logged as orphan:', email || 'no email');
+    console.warn('Payment logged as orphan:', email || 'no email', `category: ${paymentCategory}`);
     return;
   }
 
-  // Calculate total purchases for this contact
+  // Handle based on payment category
+  if (paymentCategory === 'miscellaneous') {
+    // Misc payments (<$100) - logged only, no contact update
+    console.log(`[${tenant.name}] Misc payment $${amount} logged for contact ${contactId}, no stage update`);
+    return;
+  }
+
+  // Calculate total purchases for this contact (excluding misc)
   const { data: totalPurchases } = await supabaseAdmin
     .from('payments')
     .select('amount')
     .eq('tenant_id', tenantId)
     .eq('contact_id', contactId)
-    .in('status', ['paid', 'active']);
+    .in('status', ['paid', 'active'])
+    .in('payment_category', ['deposit', 'full_purchase']);
 
   const totalAmount = totalPurchases?.reduce((sum, p) => sum + Number(p.amount), 0) || amount;
 
-  await supabaseAdmin.rpc('update_contact_with_event', {
-    p_contact_id: contactId,
-    p_update_data: {
-      email_payment: email,
-      stripe_customer_id: customerId,
-      purchase_date: new Date().toISOString(),
-      purchase_amount: totalAmount,
-      stage: 'purchased',
-    },
-    p_event_type: 'purchase_completed',
-    p_source: 'stripe',
-    p_source_event_id: eventId,
-  });
-
-  console.log(`Payment recorded for contact ${contactId}: $${amount}`);
+  if (paymentCategory === 'deposit') {
+    // $100 deposit - high intent indicator (events-first: no deprecated date columns)
+    await supabaseAdmin.rpc('update_contact_with_event', {
+      p_contact_id: contactId,
+      p_update_data: {
+        email_payment: email,
+        stripe_customer_id: customerId,
+        stage: 'deposit_paid',
+        updated_at: new Date().toISOString(),
+      },
+      p_event_type: 'deposit_paid',
+      p_source: 'stripe',
+      p_source_event_id: `stripe_deposit_${event.id}`,
+    });
+    console.log(`Deposit ($100) recorded for contact ${contactId}`);
+  } else {
+    // Full purchase (>$100) (events-first: no deprecated columns)
+    await supabaseAdmin.rpc('update_contact_with_event', {
+      p_contact_id: contactId,
+      p_update_data: {
+        email_payment: email,
+        stripe_customer_id: customerId,
+        stage: 'purchased',
+        updated_at: new Date().toISOString(),
+      },
+      p_event_type: 'purchase_completed',
+      p_source: 'stripe',
+      p_source_event_id: `stripe_purchase_${event.id}`,
+    });
+    console.log(`Full purchase ($${amount}) recorded for contact ${contactId}`);
+  }
 
   // Fire Meta CAPI Purchase event
   const metaClient = MetaCAPIClient.fromTenant(tenant);

@@ -10,7 +10,9 @@
 
 ## Overview
 
-Webhooks are the primary data ingestion mechanism. Five external systems send events to our endpoints, which normalize the data into the `contacts` and `payments` tables. All webhooks follow a consistent pattern: receive → log → match/create contact → update fields → return 200.
+Webhooks are the primary data ingestion mechanism. Five external systems send events to our endpoints, which normalize the data and create `funnel_events` records. All webhooks follow a consistent pattern: receive → log → match/create contact → create event → update stage → return 200.
+
+**Architecture (Dec 2025):** Events-first. Every webhook creates a `funnel_events` record. Contact table holds only identity + current stage + tags.
 
 **Critical Rule:** Always return HTTP 200, even on errors. This prevents retry storms from external systems.
 
@@ -32,73 +34,96 @@ Webhooks are the primary data ingestion mechanism. Five external systems send ev
 ### 1. ManyChat (`/api/webhooks/[tenant]/manychat`)
 
 **Triggers:** DM conversation events
-**Creates:** New contacts with `mc_id`
-**Updates:** `dm_qualified_date`, `link_send_date`, `link_click_date`, Q1/Q2 answers
+**Creates:** New contacts with `mc_id`, funnel_events records
+**Updates:** Contact `stage`, `tags` (JSONB)
 
-**Event Types:**
-- `contact_created` - New subscriber
-- `dm_qualified` - Completed qualification questions
-- `link_sent` - Booking link sent
-- `link_clicked` - They clicked the link
+**Event Types (→ funnel_events.event_type):**
+- `contact_created` → `contact_subscribed`
+- `dm_qualified` → `dm_qualified`
+- `link_sent` → `link_sent`
+- `link_clicked` → `link_clicked`
 
 **Key Fields Captured:**
 - `mc_id` - ManyChat subscriber ID (unique per tenant)
-- `ad_id` - Meta Ads ID from URL parameters
-- `trigger_word` - heal, thrive, etc.
-- `chatbot_ab` - A/B test variant
-- `q1_question`, `q2_question` - Qualification answers
-- `subscribed` - Original ManyChat subscription time
+- `ad_id` - Meta Ads ID from URL parameters (stored on contact)
+- `tags.chatbot` - A/B test variant (via custom field chatbot_AB)
+- `tags.source` - Traffic source if available
+
+**Data Storage:**
+- Contact: Identity + current stage + tags
+- funnel_events: Full event with timestamp, event_data, contact_snapshot
 
 ### 2. GoHighLevel (`/api/webhooks/[tenant]/ghl`)
 
 **Triggers:** Form submissions, pipeline stage changes
-**Creates:** Contacts without `mc_id` (website traffic)
-**Updates:** `ghl_id`, `form_submit_date`, `appointment_date`, `appointment_held_date`, `package_sent_date`
+**Creates:** Contacts without `mc_id` (website traffic), funnel_events records
+**Updates:** Contact `ghl_id`, `stage`, `tags`
 
-**Event Types:**
-- `FormSubmission` - Booking form submitted
-- `MeetingHeld` - Appointment completed (manual trigger)
-- `PackageSent` - Treatment package shipped
+**Event Types (→ funnel_events.event_type):**
+- `OpportunityCreate` → `form_submitted`
+- `MeetingCompleted` → `appointment_held`
+- `PackageSent` → `package_sent`
+- `PipelineStageChange` → stage-specific events
 
 **Linking Logic:**
 1. Check for existing contact by `ghl_id`
 2. If not found, try email matching (case-insensitive)
 3. If not found, create new contact
 
+**Data Storage:**
+- Contact: ghl_id + current stage + tags
+- funnel_events: Full event with ghl_id, pipeline info, timestamps
+
 ### 3. Stripe (`/api/webhooks/[tenant]/stripe`)
 
 **Triggers:** Checkout and payment events
-**Creates:** Payment records in `payments` table
-**Updates:** `purchase_date`, `purchase_amount`, `stage = 'purchased'`
+**Creates:** Payment records in `payments` table, funnel_events records
+**Updates:** Contact `stage = 'purchased'`, `stripe_customer_id`
 
-**Event Types:**
-- `checkout.session.completed` - Successful payment
-- `checkout.session.expired` - Abandoned checkout
-- `charge.refunded` - Refund processed
+**Event Types (→ funnel_events.event_type):**
+- `checkout.session.completed` → `purchase_completed`
+- `checkout.session.expired` → `checkout_abandoned`
+- `charge.refunded` → `refund_processed`
 
 **Payment Linking:**
 1. Extract email from checkout session
 2. Find contact by email (tries all 3 email fields)
-3. Create payment record with `contact_id`
-4. If no match, payment created as "orphan" (NULL contact_id)
+3. Create payment record with `contact_id` and `payment_category`
+4. Create funnel_event for purchase_completed
+5. If no match, payment created as "orphan" (NULL contact_id)
+
+**Payment Categories:** `deposit`, `full_purchase`, `downpayment`, `recurring`
 
 ### 4. Denefits (`/api/webhooks/[tenant]/denefits`)
 
 **Triggers:** BNPL financing events (via Make.com)
-**Creates:** Payment records with `payment_source = 'denefits'`
-**Updates:** Same as Stripe
+**Creates:** Payment records with `payment_source = 'denefits'`, funnel_events
+**Updates:** Contact `stage = 'purchased'`
 
-**Fields:**
+**Event Types (→ funnel_events.event_type):**
+- Application approved → `purchase_completed` (with payment_category = 'payment_plan')
+
+**Fields (in payments table):**
 - `denefits_contract_id` - Contract identifier
 - `denefits_financed_amount` - Total financed
-- `denefits_downpayment` - Initial payment
+- `denefits_downpayment` - Initial payment (creates separate payment record)
 - `denefits_recurring_amount` - Monthly payment
+
+**Payment Categories:** `payment_plan` (total financed), `downpayment` (initial payment)
 
 ### 5. Perspective (`/api/webhooks/[tenant]/perspective`)
 
-**Triggers:** Checkout abandonment events
-**Creates:** Nothing
-**Updates:** `checkout_abandoned_date`
+**Triggers:** Form submissions from Perspective funnels
+**Creates:** New contacts, funnel_events records
+**Updates:** Contact `stage`, `funnel_variant`, `tags`
+
+**Event Types (→ funnel_events.event_type):**
+- Form completion → `form_submitted`
+
+**Tags Storage:**
+- `tags.funnel` - Raw funnel name (e.g., LVNG_BOF_JANE)
+- `tags.perspective_funnel_id` - Funnel ID if available
+- Additional tags pass-through from payload
 
 ---
 
@@ -108,22 +133,36 @@ Webhooks are the primary data ingestion mechanism. Five external systems send ev
 Instagram DM                    Website Form                Direct Ad Click
      │                              │                            │
      ▼                              ▼                            ▼
-  ManyChat ──────────────────► GoHighLevel ◄──────────────── GHL Form
-     │                              │
-     │ mc_id                        │ ghl_id
-     ▼                              ▼
+  ManyChat ──────────────────► GoHighLevel ◄──────────────── Perspective
+     │                              │                            │
+     │ mc_id                        │ ghl_id                     │ email
+     ▼                              ▼                            ▼
 ┌─────────────────────────────────────────────────────────────────────┐
 │                         contacts table                               │
-│  Links via: mc_id (unique) │ ghl_id (unique) │ email (fuzzy match)  │
+│  Identity: mc_id, ghl_id, email, phone, name                        │
+│  Current State: stage, source, ad_id                                 │
+│  Flexible Metadata: tags (JSONB)                                     │
 └─────────────────────────────────────────────────────────────────────┘
                               │
-                              │ contact_id
-                              ▼
-                   ┌─────────────────────┐
-                   │   payments table    │
-                   │  (Stripe/Denefits)  │
-                   └─────────────────────┘
+         ┌────────────────────┼────────────────────┐
+         ▼                    ▼                    ▼
+┌─────────────────┐ ┌─────────────────┐ ┌─────────────────┐
+│  funnel_events  │ │    payments     │ │  webhook_logs   │
+│ (SOURCE OF      │ │ (Stripe/Denefits│ │ (Audit Trail)   │
+│  TRUTH)         │ │  transactions)  │ │                 │
+└─────────────────┘ └─────────────────┘ └─────────────────┘
 ```
+
+### Events-First Architecture (Dec 2025)
+
+Every webhook creates a `funnel_events` record:
+- `contact_id`, `tenant_id` - Links to contact
+- `event_type` - Standardized event (form_submitted, appointment_held, etc.)
+- `event_timestamp` - THE timestamp for this action
+- `source` - Which webhook (manychat, ghl, stripe, etc.)
+- `tags` - JSONB for flexible metadata (chatbot variant, funnel name)
+- `event_data` - Additional payload data
+- `contact_snapshot` - State of contact at event time
 
 ---
 

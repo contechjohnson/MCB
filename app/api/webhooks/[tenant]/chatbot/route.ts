@@ -160,7 +160,7 @@ export async function POST(
       // Get contact for additional user data
       const { data: contact } = await supabaseAdmin
         .from('contacts')
-        .select('id, email, phone, first_name, last_name, fbclid, fbp, fbc, ad_id')
+        .select('id, email_primary, phone, first_name, last_name, fbclid, fbp, fbc, ad_id')
         .eq('tenant_id', tenant.id)
         .eq('mc_id', subscriberId)
         .single();
@@ -169,7 +169,7 @@ export async function POST(
         try {
           const leadEvent = createLeadEvent(
             {
-              email: contact.email || response.email || payload.email,
+              email: contact.email_primary || response.email || payload.email,
               phone: contact.phone || payload.phone,
               firstName: contact.first_name || payload.first_name,
               lastName: contact.last_name || payload.last_name,

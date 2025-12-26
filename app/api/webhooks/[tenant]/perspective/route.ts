@@ -13,19 +13,23 @@ import {
  * Route: POST /api/webhooks/[tenant]/perspective
  * Example: POST /api/webhooks/ppcu/perspective
  *
- * Events:
- * - discovery_form_submitted: New lead from discovery call funnel (creates contact)
- * - checkout_form_submitted: Existing customer filled checkout form (updates contact)
+ * Creates contacts from Perspective form submissions.
+ * Stores the RAW funnelName in funnel_variant for flexible analysis.
+ * Uses tags for categorization (booking_source, funnel_type, etc.)
  *
- * Funnel Detection:
- * - Discovery funnel: funnelName contains 'discovery' or 'calendly' (NOT 'checkout')
- * - Checkout funnel: funnelName contains 'checkout' or doesn't match discovery
+ * PPCU Live Funnels (examples):
+ * - LVNG_BOF_Calendly → funnel_variant = 'LVNG_BOF_Calendly', tags.booking_source = 'calendly'
+ * - LVNG_BOF_JANE → funnel_variant = 'LVNG_BOF_JANE', tags.booking_source = 'jane'
+ * - LVNG_TOFMOF_MANYCHAT_JANE → funnel_variant = 'LVNG_TOFMOF_MANYCHAT_JANE', tags.booking_source = 'jane'
+ *
+ * Deprecated Funnels (skipped):
+ * - Contains 'checkout', 'supplements', or '_lm'
  */
 export async function POST(
   request: NextRequest,
-  { params }: { params: { tenant: string } }
+  { params }: { params: Promise<{ tenant: string }> }
 ) {
-  const tenantSlug = params.tenant;
+  const { tenant: tenantSlug } = await params;
 
   try {
     // Get tenant context
@@ -47,17 +51,49 @@ export async function POST(
     const values = body.values || {};
     const funnelName = (body.funnelName || '').toLowerCase();
 
-    // Determine funnel type
-    // Discovery funnel = anything that's NOT explicitly a checkout funnel
-    // Known discovery funnels: "PPCU V1 SALES FUNNEL", anything with "discovery" or "calendly"
-    // Known checkout funnels: "PPCU Checkout", anything with "checkout"
-    const isCheckoutFunnel = funnelName.includes('checkout');
-    const isDiscoveryFunnel = !isCheckoutFunnel;
+    // Skip deprecated funnels (checkout, supplements, lead magnets)
+    // PPCU deprecated funnels: LVNG_CHECKOUT, LVNG_TOF_SUPPLEMENTS, LVNG_TOF_LM
+    const isDeprecatedFunnel =
+      funnelName.includes('checkout') ||
+      funnelName.includes('supplements') ||
+      funnelName.includes('_lm');
+
+    if (isDeprecatedFunnel) {
+      console.log(`[${tenantSlug}] Skipping deprecated funnel: ${body.funnelName}`);
+      await logWebhook(supabaseAdmin, {
+        tenant_id: tenant.id,
+        source: 'perspective',
+        event_type: 'deprecated_funnel',
+        payload: body,
+        status: 'skipped',
+      });
+      return webhookSuccess({
+        message: 'Deprecated funnel skipped',
+        funnel: body.funnelName,
+        tenant: tenantSlug,
+      });
+    }
+
+    // Store RAW funnel name - no auto-derivation
+    // Tags come from the webhook payload or are set here minimally
+    const rawFunnelName = body.funnelName || 'unknown';
+
+    // Build tags: just store the funnel name, no auto-derivation
+    // Additional tags can be passed in the webhook payload via body.tags
+    const tags: Record<string, any> = {
+      funnel: rawFunnelName,
+      ...(body.tags || {}), // Accept any tags from payload
+    };
+
+    // Include perspective funnel ID if available
+    if (body.funnelId) {
+      tags.perspective_funnel_id = body.funnelId;
+    }
 
     console.log(`[${tenantSlug}] Perspective webhook received:`, {
-      funnelName: body.funnelName,
+      funnelName: rawFunnelName,
       funnelId: body.funnelId,
-      isDiscoveryFunnel,
+      tags,
       hasProfile: !!body.profile,
       timestamp: new Date().toISOString(),
     });
@@ -80,7 +116,7 @@ export async function POST(
       await logWebhook(supabaseAdmin, {
         tenant_id: tenant.id,
         source: 'perspective',
-        event_type: isDiscoveryFunnel ? 'discovery_form_submitted' : 'checkout_form_submitted',
+        event_type: 'discovery_form_submitted',
         payload: body,
         status: 'error',
         error_message: 'Missing email',
@@ -89,37 +125,26 @@ export async function POST(
     }
 
     // Log webhook received
-    const eventType = isDiscoveryFunnel ? 'discovery_form_submitted' : 'checkout_form_submitted';
     await logWebhook(supabaseAdmin, {
       tenant_id: tenant.id,
       source: 'perspective',
-      event_type: eventType,
+      event_type: 'discovery_form_submitted',
       payload: body,
       status: 'received',
     });
 
-    if (isDiscoveryFunnel) {
-      // DISCOVERY FUNNEL: Create or find contact
-      return await handleDiscoveryFunnel(tenant, {
-        email,
-        firstName,
-        phone,
-        adId,
-        convertedAt,
-        body,
-        tenantSlug,
-      });
-    } else {
-      // CHECKOUT FUNNEL: Update existing contact (original behavior)
-      return await handleCheckoutFunnel(tenant, {
-        email,
-        firstName,
-        phone,
-        convertedAt,
-        body,
-        tenantSlug,
-      });
-    }
+    // All non-deprecated funnels are discovery funnels
+    return await handleDiscoveryFunnel(tenant, {
+      email,
+      firstName,
+      phone,
+      adId,
+      convertedAt,
+      funnelVariant: rawFunnelName, // Store raw funnel name
+      tags,
+      body,
+      tenantSlug,
+    });
   } catch (error) {
     console.error(`[${tenantSlug}] Perspective webhook error:`, error);
     return webhookError(
@@ -130,7 +155,7 @@ export async function POST(
 }
 
 /**
- * Handle Discovery Funnel - Creates new contacts for calendly_free funnel
+ * Handle Discovery Funnel - Creates new contacts with raw funnel_variant and tags
  */
 async function handleDiscoveryFunnel(
   tenant: { id: string; name: string },
@@ -140,16 +165,18 @@ async function handleDiscoveryFunnel(
     phone?: string;
     adId?: string;
     convertedAt?: string;
+    funnelVariant: string; // Raw funnel name
+    tags: Record<string, any>;
     body: any;
     tenantSlug: string;
   }
 ) {
-  const { email, firstName, phone, adId, convertedAt, body, tenantSlug } = data;
+  const { email, firstName, phone, adId, convertedAt, funnelVariant, tags, body, tenantSlug } = data;
 
   // Try to find existing contact by email
   const { data: existingContact } = await supabaseAdmin
     .from('contacts')
-    .select('id, funnel_variant')
+    .select('id, tags')
     .eq('tenant_id', tenant.id)
     .or(
       `email_primary.ilike.${email},email_booking.ilike.${email},email_payment.ilike.${email}`
@@ -157,18 +184,19 @@ async function handleDiscoveryFunnel(
     .single();
 
   if (existingContact) {
-    // Contact exists - update with form submit data but preserve funnel_variant
+    // Contact exists - update with identity data but preserve existing tags.funnel
     console.log(
       `[${tenantSlug}] Discovery funnel: existing contact found ${existingContact.id}, updating`
     );
 
+    // Events-first: Only update identity fields + stage
     const updateData: any = {
-      form_submit_date: convertedAt || new Date().toISOString(),
+      stage: 'form_submitted',
+      updated_at: new Date().toISOString(),
     };
     if (firstName) updateData.first_name = firstName;
     if (phone) updateData.phone = phone;
     if (adId) updateData.ad_id = adId;
-    // Don't overwrite funnel_variant if already set
 
     const { error: updateError } = await supabaseAdmin.rpc('update_contact_with_event', {
       p_contact_id: existingContact.id,
@@ -176,6 +204,7 @@ async function handleDiscoveryFunnel(
       p_event_type: 'form_submitted',
       p_source: 'perspective',
       p_source_event_id: `perspective_discovery_${email}_${Date.now()}`,
+      p_tags: tags, // Pass tags to merge with existing
     });
 
     if (updateError) {
@@ -208,8 +237,11 @@ async function handleDiscoveryFunnel(
     });
   }
 
-  // Create new contact for discovery funnel
-  console.log(`[${tenantSlug}] Discovery funnel: creating new contact for ${email}`);
+  // Create new contact for discovery funnel (events-first: no deprecated columns)
+  console.log(`[${tenantSlug}] Discovery funnel: creating new contact for ${email} (funnel: ${funnelVariant})`);
+
+  // Store funnel name in tags instead of deprecated funnel_variant column
+  const contactTags = { ...tags, funnel: funnelVariant };
 
   const { data: newContact, error: insertError } = await supabaseAdmin
     .from('contacts')
@@ -220,10 +252,8 @@ async function handleDiscoveryFunnel(
       phone: phone || null,
       ad_id: adId || null,
       source: 'instagram_direct',
-      funnel_variant: 'calendly_free',
+      tags: contactTags, // Funnel name stored in tags.funnel
       stage: 'form_submitted',
-      form_submit_date: convertedAt || new Date().toISOString(),
-      subscribe_date: convertedAt || new Date().toISOString(),
     })
     .select('id')
     .single();
@@ -249,21 +279,20 @@ async function handleDiscoveryFunnel(
     source: 'perspective',
     source_event_id: `perspective_discovery_${email}_${Date.now()}`,
     event_data: {
-      funnel_variant: 'calendly_free',
       ad_id: adId,
       funnel_name: body.funnelName,
     },
+    tags: contactTags, // Tags include funnel name
     contact_snapshot: {
       email,
       first_name: firstName,
       phone,
       stage: 'form_submitted',
       source: 'instagram_direct',
-      funnel_variant: 'calendly_free',
     },
   });
 
-  console.log(`[${tenantSlug}] New calendly_free contact created: ${newContact.id}`);
+  console.log(`[${tenantSlug}] New ${funnelVariant} contact created: ${newContact.id}`);
 
   await logWebhook(supabaseAdmin, {
     tenant_id: tenant.id,
@@ -279,93 +308,7 @@ async function handleDiscoveryFunnel(
     message: 'Discovery form submitted - new contact created',
     tenant: tenantSlug,
     is_new: true,
-    funnel_variant: 'calendly_free',
-  });
-}
-
-/**
- * Handle Checkout Funnel - Updates existing contacts (original behavior)
- */
-async function handleCheckoutFunnel(
-  tenant: { id: string; name: string },
-  data: {
-    email: string;
-    firstName?: string;
-    phone?: string;
-    convertedAt?: string;
-    body: any;
-    tenantSlug: string;
-  }
-) {
-  const { email, firstName, phone, convertedAt, body, tenantSlug } = data;
-
-  // Find contact by email (tenant-scoped)
-  const { data: contact } = await supabaseAdmin
-    .from('contacts')
-    .select('id')
-    .eq('tenant_id', tenant.id)
-    .or(
-      `email_primary.ilike.${email},email_booking.ilike.${email},email_payment.ilike.${email}`
-    )
-    .single();
-
-  if (!contact) {
-    console.warn(`[${tenantSlug}] No contact found for Perspective checkout:`, email);
-    await logWebhook(supabaseAdmin, {
-      tenant_id: tenant.id,
-      source: 'perspective',
-      event_type: 'checkout_form_submitted',
-      payload: body,
-      status: 'no_contact_found',
-    });
-    return webhookSuccess({
-      message: 'No contact found - they may not have had discovery call yet',
-      tenant: tenantSlug,
-    });
-  }
-
-  // Update contact with checkout_started timestamp
-  const updateData: any = {
-    checkout_started: convertedAt || new Date().toISOString(),
-  };
-  if (firstName) updateData.first_name = firstName;
-  if (phone) updateData.phone = phone;
-
-  const { error: updateError } = await supabaseAdmin.rpc('update_contact_with_event', {
-    p_contact_id: contact.id,
-    p_update_data: updateData,
-    p_event_type: 'checkout_started',
-    p_source: 'perspective',
-    p_source_event_id: `perspective_checkout_${email}_${Date.now()}`,
-  });
-
-  if (updateError) {
-    await logWebhook(supabaseAdmin, {
-      tenant_id: tenant.id,
-      source: 'perspective',
-      event_type: 'checkout_form_submitted',
-      payload: body,
-      status: 'error',
-      error_message: updateError.message,
-    });
-    return webhookError(updateError.message);
-  }
-
-  console.log(`[${tenantSlug}] Checkout started for contact ${contact.id}: ${email}`);
-
-  await logWebhook(supabaseAdmin, {
-    tenant_id: tenant.id,
-    source: 'perspective',
-    event_type: 'checkout_form_submitted',
-    payload: body,
-    contact_id: contact.id,
-    status: 'processed',
-  });
-
-  return webhookSuccess({
-    contact_id: contact.id,
-    message: 'Checkout started timestamp recorded',
-    tenant: tenantSlug,
+    funnel_variant: funnelVariant,
   });
 }
 
@@ -385,18 +328,21 @@ function normalizePhone(phone?: string): string | undefined {
  */
 export async function GET(
   request: NextRequest,
-  { params }: { params: { tenant: string } }
+  { params }: { params: Promise<{ tenant: string }> }
 ) {
-  const tenant = await getTenantContext(params.tenant);
+  const { tenant: tenantSlug } = await params;
+  const tenant = await getTenantContext(tenantSlug);
   return NextResponse.json({
     status: 'ok',
-    tenant: params.tenant,
+    tenant: tenantSlug,
     tenant_name: tenant?.name || 'Unknown',
     message: 'Perspective webhook endpoint is live',
-    purpose: 'Handles both discovery funnel (creates contacts) and checkout funnel (updates contacts)',
-    funnels: {
-      discovery: 'funnelName contains "discovery" or "calendly" → creates calendly_free contact',
-      checkout: 'funnelName contains "checkout" → updates existing contact checkout_started',
+    purpose: 'Creates contacts from funnels - events-first architecture',
+    behavior: {
+      funnel_variant: 'Stores RAW funnelName in funnel_variant column',
+      tags: 'Pass-through from payload + funnel name stored as tags.funnel',
     },
+    note: 'No auto-derivation - tags come from webhook payload',
+    deprecated_funnels: ['checkout', 'supplements', '_lm'],
   });
 }

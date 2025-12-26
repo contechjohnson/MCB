@@ -1,111 +1,152 @@
 # Database Schema Reference
 
-**Last Updated:** November 8, 2025
-**Schema Version:** v2.2
+**Last Updated:** December 25, 2025
+**Schema Version:** v3.0 (Events-First Architecture)
 **Database:** Supabase PostgreSQL
+
+---
+
+## 🚨 ARCHITECTURE CHANGE (Dec 2025)
+
+**Events-First:** `funnel_events` is the single source of truth for all funnel analytics.
+**Contacts Simplified:** Identity + current state only. All date columns REMOVED.
 
 ---
 
 ## 📊 Quick Reference
 
-| Table | Purpose | Rows | Primary Use |
-|-------|---------|------|-------------|
-| `contacts` | Main customer records | 1,578 | Contact management, funnel tracking |
-| `payments` | Payment transactions | 5 | Revenue tracking, attribution |
-| `webhook_logs` | Webhook audit trail | 1,266 | Debugging, event replay |
-| `meta_ads` | Meta ad configurations | 38 | Ad performance tracking |
-| `meta_ad_creatives` | Ad creative content | 38 | Creative analysis |
-| `meta_ad_insights` | Daily ad metrics | 38 | Performance trends |
-
-**Total Records:** ~3,000
+| Table | Purpose | Primary Use |
+|-------|---------|-------------|
+| `contacts` | Identity + current state | Contact matching, current stage |
+| `funnel_events` | **SOURCE OF TRUTH** | All funnel analytics, conversion tracking |
+| `payments` | Payment transactions | Revenue tracking, attribution |
+| `webhook_logs` | Webhook audit trail | Debugging, event replay |
+| `meta_ads` | Meta ad configurations | Ad performance tracking |
+| `meta_ad_creatives` | Ad creative content | Creative analysis |
+| `meta_ad_insights` | Daily ad metrics | Performance trends |
+| `tenants` | Multi-tenant config | Tenant routing, credentials |
 
 ---
 
 ## 🔑 Core Tables
 
-### `contacts` (Main Contact Records)
+### `contacts` (Identity + Current State)
 
-**Purpose:** Central table for all customer interactions across the entire funnel.
+**Purpose:** Identity and current state only. Query `funnel_events` for history.
 
 **Primary Key:** `id` (UUID)
 
-**Unique Identifiers:**
-- `mc_id` (TEXT, UNIQUE) - ManyChat subscriber ID
-- `ghl_id` (TEXT, UNIQUE) - GoHighLevel contact ID
-- `email_primary` - Primary email address
-- `ig_id` (BIGINT) - Instagram user ID
-- `stripe_customer_id` - Stripe customer reference
-
-**Personal Information:**
+**Schema (20 columns only):**
 | Column | Type | Description |
 |--------|------|-------------|
-| `first_name` | TEXT | First name |
-| `last_name` | TEXT | Last name |
+| `id` | UUID | Primary key |
+| `tenant_id` | UUID | FK to tenants |
+| `created_at` | TIMESTAMPTZ | Record created |
+| `updated_at` | TIMESTAMPTZ | Last updated |
+| `mc_id` | TEXT | ManyChat subscriber ID (UNIQUE) |
+| `ghl_id` | TEXT | GoHighLevel contact ID (UNIQUE) |
+| `ig` | TEXT | Instagram handle |
+| `ig_id` | BIGINT | Instagram user ID |
+| `fb` | TEXT | Facebook profile |
+| `stripe_customer_id` | TEXT | Stripe customer reference |
 | `email_primary` | TEXT | Primary email (from MC) |
 | `email_booking` | TEXT | Email used for booking |
 | `email_payment` | TEXT | Email used for payment |
 | `phone` | TEXT | Phone number |
-| `ig` | TEXT | Instagram handle |
-| `fb` | TEXT | Facebook profile |
-
-**Stage Tracking:**
-| Column | Type | Description | Default |
-|--------|------|-------------|---------|
-| `stage` | TEXT | Current funnel stage | `'new_lead'` |
-| `subscribed` | TIMESTAMPTZ | ManyChat subscription time | NULL |
-| `subscribe_date` | TIMESTAMPTZ | When subscribed | NULL |
-| `dm_qualified_date` | TIMESTAMPTZ | When qualified via DM | NULL |
-| `link_send_date` | TIMESTAMPTZ | Link sent to contact | NULL |
-| `link_click_date` | TIMESTAMPTZ | Link clicked | NULL |
-| `form_submit_date` | TIMESTAMPTZ | Booking form submitted | NULL |
-| `appointment_date` | TIMESTAMPTZ | Appointment scheduled | NULL |
-| `appointment_held_date` | TIMESTAMPTZ | Appointment completed | NULL |
-| `package_sent_date` | TIMESTAMPTZ | Treatment package sent | NULL |
-| `checkout_started` | TIMESTAMPTZ | Started checkout | NULL |
-| `purchase_date` | TIMESTAMPTZ | Purchased | NULL |
+| `first_name` | TEXT | First name |
+| `last_name` | TEXT | Last name |
+| `stage` | TEXT | Current funnel stage |
+| `source` | TEXT | Traffic source |
+| `ad_id` | TEXT | Meta Ads ID (first-touch) |
+| `tags` | JSONB | Flexible metadata |
 
 **Stage Values:**
 - `new_lead` - Initial contact
 - `dm_qualified` - Qualified via ManyChat
+- `landing_link_sent` - Booking link sent
+- `landing_link_clicked` - Link clicked
+- `form_submitted` - Form completed
 - `call_booked` - Appointment scheduled
 - `meeting_held` - Appointment completed
 - `purchased` - Made a purchase
 
-**Attribution & Testing:**
+**Tags (JSONB) Common Keys:**
+- `chatbot` - A/B test variant (A, B)
+- `funnel` - Raw funnel name from Perspective
+- `source` - Additional source info
+
+**⚠️ REMOVED COLUMNS (Dec 2025):**
+These columns no longer exist - query `funnel_events` instead:
+- ~~subscribe_date~~, ~~dm_qualified_date~~, ~~link_send_date~~, ~~link_click_date~~
+- ~~form_submit_date~~, ~~appointment_date~~, ~~appointment_held_date~~
+- ~~purchase_date~~, ~~deposit_paid_date~~, ~~package_sent_date~~, ~~checkout_started~~
+- ~~chatbot_ab~~, ~~funnel_variant~~, ~~misc_ab~~ (use `tags` JSONB)
+- ~~purchase_amount~~ (use `payments` table)
+- ~~q1_question~~, ~~q2_question~~, ~~objections~~, ~~lead_summary~~, ~~trigger_word~~ (use `funnel_events.event_data`)
+- ~~thread_id~~, ~~subscribed~~, ~~ig_last_interaction~~
+
+---
+
+### `funnel_events` (SOURCE OF TRUTH)
+
+**Purpose:** All funnel history. Every webhook creates an event here.
+
+**Primary Key:** `id` (UUID)
+
+**Schema:**
 | Column | Type | Description |
 |--------|------|-------------|
-| `ad_id` | TEXT | Meta Ads ID (from MC params) |
-| `source` | TEXT | Traffic source (instagram, website, etc.) |
-| `chatbot_ab` | TEXT | Chatbot variant (A/B test) |
-| `misc_ab` | TEXT | Other A/B test variants |
-| `trigger_word` | TEXT | Initial trigger word |
-| `thread_id` | TEXT | OpenAI Assistant thread ID |
+| `id` | UUID | Primary key |
+| `tenant_id` | UUID | FK to tenants |
+| `contact_id` | UUID | FK to contacts |
+| `event_type` | TEXT | Standardized event type |
+| `event_timestamp` | TIMESTAMPTZ | When the event occurred |
+| `source` | TEXT | Which webhook (manychat, ghl, stripe, etc.) |
+| `source_event_id` | TEXT | Unique ID for deduplication |
+| `event_data` | JSONB | Additional payload data |
+| `tags` | JSONB | Flexible metadata (chatbot, funnel, etc.) |
+| `contact_snapshot` | JSONB | State of contact at event time |
+| `created_at` | TIMESTAMPTZ | Record created |
 
-**Qualification Data:**
-| Column | Type | Description |
-|--------|------|-------------|
-| `q1_question` | TEXT | Question 1 response |
-| `q2_question` | TEXT | Question 2 response |
-| `objections` | TEXT | Objections mentioned |
-| `lead_summary` | TEXT | AI-generated summary |
+**Event Types:**
+- `contact_subscribed` - New contact via ManyChat
+- `dm_qualified` - Qualification questions answered
+- `link_sent` - Booking link sent
+- `link_clicked` - Link clicked
+- `form_submitted` - Form completed (GHL or Perspective)
+- `appointment_booked` - Meeting scheduled
+- `appointment_held` - Meeting completed
+- `package_sent` - Package shipped
+- `purchase_completed` - Payment received
+- `checkout_abandoned` - Checkout not completed
 
-**Revenue:**
-| Column | Type | Description |
-|--------|------|-------------|
-| `purchase_amount` | NUMERIC | Total purchase amount |
-| `purchase_date` | TIMESTAMPTZ | When purchased |
+**Query Examples:**
+```sql
+-- Funnel conversion
+SELECT event_type, COUNT(DISTINCT contact_id)
+FROM funnel_events
+WHERE tenant_id = 'ppcu-uuid'
+  AND event_timestamp >= NOW() - INTERVAL '30 days'
+GROUP BY event_type;
 
-**Metadata:**
-| Column | Type | Description | Default |
-|--------|------|-------------|---------|
-| `created_at` | TIMESTAMPTZ | Record created | `now()` |
-| `updated_at` | TIMESTAMPTZ | Last updated | `now()` |
-| `ig_last_interaction` | TIMESTAMPTZ | Last IG interaction | NULL |
+-- Chatbot A/B comparison
+SELECT tags->>'chatbot' as variant, COUNT(DISTINCT contact_id)
+FROM funnel_events
+WHERE tags->>'chatbot' IS NOT NULL
+GROUP BY tags->>'chatbot';
+
+-- Journey for specific contact
+SELECT event_type, event_timestamp, source
+FROM funnel_events
+WHERE contact_id = 'contact-uuid'
+ORDER BY event_timestamp;
+```
 
 **Indexes:**
 - PRIMARY KEY on `id`
-- UNIQUE on `mc_id`
-- UNIQUE on `ghl_id`
+- UNIQUE on `source_event_id` (deduplication)
+- INDEX on `(tenant_id, event_timestamp)`
+- INDEX on `(tenant_id, contact_id)`
 
 ---
 
@@ -368,17 +409,51 @@ contacts (0..n) ←→ (1) meta_ads
 
 ---
 
-## 🔍 Common Queries
+## 🔍 Common Queries (Events-First)
 
-### Count contacts by stage:
+### Funnel Conversion (Events):
 ```sql
-SELECT stage, COUNT(*)
-FROM contacts
-GROUP BY stage
-ORDER BY COUNT(*) DESC;
+SELECT
+  event_type,
+  COUNT(DISTINCT contact_id) as contacts
+FROM funnel_events
+WHERE tenant_id = 'ppcu-uuid'
+  AND event_timestamp >= NOW() - INTERVAL '30 days'
+  AND event_type IN (
+    'contact_subscribed', 'dm_qualified', 'link_clicked',
+    'form_submitted', 'appointment_held', 'purchase_completed'
+  )
+GROUP BY event_type;
 ```
 
-### Linkage rates:
+### Chatbot A/B Comparison:
+```sql
+SELECT
+  tags->>'chatbot' as variant,
+  COUNT(DISTINCT contact_id) as leads,
+  COUNT(DISTINCT CASE WHEN event_type = 'form_submitted' THEN contact_id END) as forms,
+  COUNT(DISTINCT CASE WHEN event_type = 'purchase_completed' THEN contact_id END) as purchases
+FROM funnel_events
+WHERE tenant_id = 'ppcu-uuid'
+  AND tags->>'chatbot' IS NOT NULL
+  AND event_timestamp >= NOW() - INTERVAL '60 days'
+GROUP BY tags->>'chatbot';
+```
+
+### Revenue by Source:
+```sql
+SELECT
+  c.source,
+  COUNT(DISTINCT p.contact_id) as customers,
+  SUM(p.amount) as revenue
+FROM payments p
+JOIN contacts c ON p.contact_id = c.id
+WHERE p.tenant_id = 'ppcu-uuid'
+  AND p.payment_category IN ('deposit', 'full_purchase', 'downpayment')
+GROUP BY c.source;
+```
+
+### Linkage Rates:
 ```sql
 SELECT
   COUNT(*) as total,
@@ -386,36 +461,45 @@ SELECT
   COUNT(ghl_id) as has_ghl,
   COUNT(CASE WHEN mc_id IS NOT NULL AND ghl_id IS NOT NULL THEN 1 END) as linked,
   ROUND(100.0 * COUNT(CASE WHEN mc_id IS NOT NULL AND ghl_id IS NOT NULL THEN 1 END) / COUNT(*), 1) as linkage_pct
-FROM contacts;
+FROM contacts
+WHERE tenant_id = 'ppcu-uuid';
 ```
 
-### Orphan payments:
+### Orphan Payments:
 ```sql
 SELECT
   COUNT(*) as total_payments,
   COUNT(contact_id) as linked,
   COUNT(*) - COUNT(contact_id) as orphaned
-FROM payments;
+FROM payments
+WHERE tenant_id = 'ppcu-uuid';
 ```
 
-### Funnel conversion:
+### Contact Journey:
 ```sql
 SELECT
-  COUNT(*) as total,
-  COUNT(CASE WHEN dm_qualified_date IS NOT NULL THEN 1 END) as dm_qualified,
-  COUNT(CASE WHEN appointment_date IS NOT NULL THEN 1 END) as booked,
-  COUNT(CASE WHEN appointment_held_date IS NOT NULL THEN 1 END) as attended,
-  COUNT(CASE WHEN purchase_date IS NOT NULL THEN 1 END) as purchased
-FROM contacts;
+  event_type,
+  event_timestamp,
+  source,
+  tags
+FROM funnel_events
+WHERE contact_id = 'contact-uuid'
+ORDER BY event_timestamp;
 ```
 
-### Recent activity:
+### Recent Activity:
 ```sql
 SELECT
-  first_name, last_name, email_primary, stage, created_at
-FROM contacts
-WHERE created_at > NOW() - INTERVAL '7 days'
-ORDER BY created_at DESC
+  c.first_name,
+  c.email_primary,
+  fe.event_type,
+  fe.event_timestamp,
+  fe.source
+FROM funnel_events fe
+JOIN contacts c ON fe.contact_id = c.id
+WHERE fe.tenant_id = 'ppcu-uuid'
+  AND fe.event_timestamp >= NOW() - INTERVAL '7 days'
+ORDER BY fe.event_timestamp DESC
 LIMIT 20;
 ```
 

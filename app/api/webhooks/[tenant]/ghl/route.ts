@@ -23,12 +23,25 @@ import {
  * - MeetingCompleted: Meeting attended
  * - PackageSent: Treatment package sent
  * - ContactUpdate: Contact info updated
+ *
+ * Tags Support:
+ * Pass tags via customData.tags for flexible categorization:
+ * - booking_source: jane | calendly | website
+ * - pipeline: ppcu_pipeline | free_discovery_call
+ * - Any custom tags you need
+ *
+ * Example customData with tags:
+ * {
+ *   "contact_id": "{{contact.id}}",
+ *   "pipeline_stage": "meeting_attended",
+ *   "tags": {"booking_source": "jane", "pipeline": "ppcu_pipeline"}
+ * }
  */
 export async function POST(
   request: NextRequest,
-  { params }: { params: { tenant: string } }
+  { params }: { params: Promise<{ tenant: string }> }
 ) {
-  const tenantSlug = params.tenant;
+  const { tenant: tenantSlug } = await params;
 
   try {
     // Get tenant context
@@ -58,10 +71,25 @@ export async function POST(
     const eventType = customData.event_type || body.type || determineEventTypeFromStage(body);
     const email = (body.email || customData.email)?.toLowerCase().trim();
     const phone = normalizePhone(customData.phone || body.phone);
+    const ghlStage = (body.pipleline_stage || body.pipeline_stage || '').toLowerCase();
+    const customStage = (customData.pipeline_stage || '').toLowerCase();
+
+    // Tags: pass-through from customData.tags, no auto-derivation
+    // Include ghl_stage for reference
+    const tags: Record<string, any> = {
+      ...(customData.tags || {}), // User-provided tags
+    };
+
+    // Always include ghl_stage if available
+    if (ghlStage || customStage) {
+      tags.ghl_stage = ghlStage || customStage;
+    }
 
     if (!ghlContactId) {
       return webhookError('Missing contact_id');
     }
+
+    console.log(`[${tenantSlug}] GHL webhook tags:`, tags);
 
     // Skip NO SHOW events - just log and return success
     if (eventType === 'NoShow') {
@@ -76,6 +104,24 @@ export async function POST(
       });
       return webhookSuccess({
         message: 'NO SHOW event skipped',
+        ghl_id: ghlContactId,
+        tenant: tenantSlug,
+      });
+    }
+
+    // Skip payment stages - Stripe/Denefits handles these
+    if (eventType === 'PaymentStage') {
+      console.log(`[${tenantSlug}] Skipping payment stage for GHL contact ${ghlContactId}`);
+      await logWebhook(supabaseAdmin, {
+        tenant_id: tenant.id,
+        source: 'ghl',
+        event_type: 'PaymentStage',
+        payload: body,
+        ghl_id: ghlContactId,
+        status: 'skipped',
+      });
+      return webhookSuccess({
+        message: 'Payment stage skipped - Stripe/Denefits handles payments',
         ghl_id: ghlContactId,
         tenant: tenantSlug,
       });
@@ -102,18 +148,8 @@ export async function POST(
       source: customData.source || undefined,
     });
 
-    // Fetch current contact state to check for existing dates (prevents overwriting)
-    const { data: currentContact } = await supabaseAdmin
-      .from('contacts')
-      .select('appointment_held_date, appointment_date')
-      .eq('id', contactId)
-      .single();
-
-    // Build update data based on event (pass current state to prevent overwrites)
-    const updateData = buildGHLUpdateData(eventType, body, {
-      hasAppointmentHeldDate: !!currentContact?.appointment_held_date,
-      hasAppointmentDate: !!currentContact?.appointment_date,
-    });
+    // Build update data based on event (events-first: only identity + stage)
+    const updateData = buildGHLUpdateData(eventType, body);
 
     // Map GHL event types to standardized event types
     const eventTypeMap: Record<string, string> = {
@@ -132,6 +168,7 @@ export async function POST(
       p_event_type: standardEventType,
       p_source: 'ghl',
       p_source_event_id: standardEventType ? `ghl_${ghlContactId}_${Date.now()}` : null,
+      p_tags: tags, // Pass tags for contact and event
     });
 
     if (updateError) {
@@ -222,15 +259,27 @@ export async function POST(
  */
 export async function GET(
   request: NextRequest,
-  { params }: { params: { tenant: string } }
+  { params }: { params: Promise<{ tenant: string }> }
 ) {
-  const tenant = await getTenantContext(params.tenant);
+  const { tenant: tenantSlug } = await params;
+  const tenant = await getTenantContext(tenantSlug);
   return NextResponse.json({
     status: 'ok',
-    tenant: params.tenant,
+    tenant: tenantSlug,
     tenant_name: tenant?.name || 'Unknown',
     message: 'GoHighLevel webhook endpoint is live',
     events: ['OpportunityCreate', 'MeetingCompleted', 'PackageSent', 'ContactUpdate'],
+    tags_support: {
+      description: 'Pass-through tags via customData.tags - no auto-derivation',
+      note: 'ghl_stage is automatically added if available',
+      example: {
+        customData: {
+          contact_id: '{{contact.id}}',
+          pipeline_stage: 'meeting_attended',
+          tags: { booking_source: 'jane', campaign: 'holiday_2025' },
+        },
+      },
+    },
   });
 }
 
@@ -299,8 +348,8 @@ async function findOrCreateContactGHL(
     }
   }
 
-  // Create new contact - default to jane_paid funnel (ManyChat/DM flow)
-  // Contacts from Perspective discovery funnel will already exist with calendly_free
+  // Create new contact (events-first: no deprecated columns)
+  // Use tags for funnel tracking instead of funnel_variant column
   const { data: newContact, error } = await supabaseAdmin
     .from('contacts')
     .insert({
@@ -312,7 +361,7 @@ async function findOrCreateContactGHL(
       last_name: data.lastName || null,
       stage: 'form_submitted',
       source: data.source || 'website',
-      funnel_variant: 'jane_paid', // Default for GHL-created contacts
+      tags: { funnel: 'jane_paid' }, // Use tags JSONB instead of deprecated column
     })
     .select('id')
     .single();
@@ -335,6 +384,15 @@ function determineEventTypeFromStage(body: any): string {
   // Skip NO SHOW - don't process these
   if (ghlStage.includes('no show') || ghlStage.includes('noshow') || ghlStage.includes('no-show')) {
     return 'NoShow';
+  }
+
+  // Skip payment stages - Stripe/Denefits handles these
+  // PPCU stages: "$100 Deposit Paid", "Pay In Full"
+  if (ghlStage.includes('deposit') ||
+      ghlStage.includes('paid') ||
+      ghlStage.includes('pay in full') ||
+      ghlStage.includes('payment')) {
+    return 'PaymentStage';
   }
 
   // If customData.pipeline_stage exists, use it (Jane/CLARA pipeline)
@@ -374,16 +432,16 @@ function determineEventTypeFromStage(body: any): string {
 
 /**
  * Build update data based on GHL event type
- * @param currentState - Current contact state to prevent overwriting certain fields
+ *
+ * EVENTS-FIRST ARCHITECTURE:
+ * - Only update identity fields + current stage on contacts
+ * - All date/history tracking is done via funnel_events table
  */
-function buildGHLUpdateData(
-  eventType: string,
-  body: any,
-  currentState: { hasAppointmentHeldDate?: boolean; hasAppointmentDate?: boolean } = {}
-) {
+function buildGHLUpdateData(eventType: string, body: any) {
   const customData = body.customData || {};
   const customFields = body;
 
+  // Only fields that exist in the contacts table (20 columns)
   const baseData: any = {
     email_booking: (body.email || customData.email)?.toLowerCase().trim() || null,
     phone: normalizePhone(customData.phone || body.phone) || null,
@@ -391,7 +449,6 @@ function buildGHLUpdateData(
     last_name: customData.last_name || body.last_name || null,
     mc_id: customData.MC_ID || customFields.MC_ID || null,
     ad_id: customData.AD_ID || customFields.AD_ID || null,
-    thread_id: customData.THREAD_ID || customFields.THREAD_ID || null,
     source:
       customData.source ||
       (customData.MC_ID || customFields.MC_ID || customData.AD_ID || customFields.AD_ID
@@ -401,72 +458,41 @@ function buildGHLUpdateData(
   };
 
   const stage = (customData.pipeline_stage || body.pipleline_stage || body.pipeline_stage || '').toLowerCase();
-  const appointmentTime = body['Discovery Call Time (EST)'] || body.appointment_start_time;
 
+  // Stage progression based on event type
   if (eventType === 'OpportunityCreate' || eventType.includes('Opportunity')) {
     if (stage === 'form_filled') {
-      return { ...baseData, form_submit_date: new Date().toISOString(), stage: 'form_submitted' };
+      return { ...baseData, stage: 'form_submitted' };
     }
-    if (stage === 'meeting_booked') {
-      return {
-        ...baseData,
-        stage: 'meeting_booked',
-        appointment_date: appointmentTime ? new Date(appointmentTime).toISOString() : new Date().toISOString(),
-      };
-    }
-    // DC BOOKED from FREE DISCOVERY CALL PIPELINE
-    if (stage === 'dc booked') {
-      return {
-        ...baseData,
-        stage: 'meeting_booked',
-        appointment_date: appointmentTime ? new Date(appointmentTime).toISOString() : new Date().toISOString(),
-      };
+    if (stage === 'meeting_booked' || stage === 'dc booked') {
+      return { ...baseData, stage: 'meeting_booked' };
     }
     if (stage === 'meeting_attended') {
-      // Only set appointment_held_date if not already set (prevents overwriting)
-      const result: any = { ...baseData, stage: 'meeting_held' };
-      if (!currentState.hasAppointmentHeldDate) {
-        result.appointment_held_date = new Date().toISOString();
-      }
-      return result;
+      return { ...baseData, stage: 'meeting_held' };
     }
     if (stage === 'package_sent') {
-      return { ...baseData, package_sent_date: new Date().toISOString(), stage: 'package_sent' };
+      return { ...baseData, stage: 'package_sent' };
     }
 
-    // Fallback
-    const opportunityData: any = { ...baseData, form_submit_date: new Date().toISOString() };
-    if (stage.includes('scheduled') || stage.includes('booked') || appointmentTime) {
-      opportunityData.appointment_date = appointmentTime
-        ? new Date(appointmentTime).toISOString()
-        : new Date().toISOString();
-      opportunityData.stage = 'meeting_booked';
+    // Fallback stage detection
+    if (stage.includes('scheduled') || stage.includes('booked')) {
+      return { ...baseData, stage: 'meeting_booked' };
     }
     if (stage.includes('completed') || stage.includes('attended') || stage.includes('show')) {
-      // Only set appointment_held_date if not already set (prevents overwriting)
-      if (!currentState.hasAppointmentHeldDate) {
-        opportunityData.appointment_held_date = new Date().toISOString();
-      }
-      opportunityData.stage = 'meeting_held';
+      return { ...baseData, stage: 'meeting_held' };
     }
     if (stage.includes('package') || stage.includes('sent')) {
-      opportunityData.package_sent_date = new Date().toISOString();
-      opportunityData.stage = 'package_sent';
+      return { ...baseData, stage: 'package_sent' };
     }
-    return opportunityData;
+    return { ...baseData, stage: 'form_submitted' };
   }
 
   if (eventType === 'MeetingCompleted') {
-    // Only set appointment_held_date if not already set (prevents overwriting from multiple triggers)
-    const result: any = { ...baseData, stage: 'meeting_held' };
-    if (!currentState.hasAppointmentHeldDate) {
-      result.appointment_held_date = new Date().toISOString();
-    }
-    return result;
+    return { ...baseData, stage: 'meeting_held' };
   }
 
   if (eventType === 'PackageSent') {
-    return { ...baseData, package_sent_date: new Date().toISOString(), stage: 'package_sent' };
+    return { ...baseData, stage: 'package_sent' };
   }
 
   if (eventType === 'ContactCreate' || eventType === 'ContactUpdate') {
@@ -486,3 +512,4 @@ function normalizePhone(phone?: string): string | null {
   if (digits.length === 11 && digits.startsWith('1')) return `+${digits}`;
   return digits.length > 0 ? `+${digits}` : null;
 }
+

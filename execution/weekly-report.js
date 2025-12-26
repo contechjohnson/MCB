@@ -42,76 +42,126 @@ function getThisWeek() {
   };
 }
 
+/**
+ * Count events by type within a date range
+ * Uses funnel_events table as primary source (not contact fields)
+ */
+async function countEventsByType(eventType, startDate, endDate, tenantId = null) {
+  let query = supabase
+    .from('funnel_events')
+    .select('contact_id', { count: 'exact' })
+    .eq('event_type', eventType)
+    .gte('event_timestamp', startDate)
+    .lte('event_timestamp', endDate + 'T23:59:59');
+
+  if (tenantId) {
+    query = query.eq('tenant_id', tenantId);
+  }
+
+  const { count } = await query;
+  return count || 0;
+}
+
+/**
+ * Get unique contacts who had a specific event in date range
+ */
+async function getContactsWithEvent(eventType, startDate, endDate, tenantId = null) {
+  let query = supabase
+    .from('funnel_events')
+    .select('contact_id')
+    .eq('event_type', eventType)
+    .gte('event_timestamp', startDate)
+    .lte('event_timestamp', endDate + 'T23:59:59');
+
+  if (tenantId) {
+    query = query.eq('tenant_id', tenantId);
+  }
+
+  const { data } = await query;
+  // Return unique contact IDs
+  const uniqueContacts = [...new Set(data?.map(e => e.contact_id) || [])];
+  return uniqueContacts;
+}
+
 async function fetchWeekActivity(startDate, endDate) {
   const endDateTime = endDate + 'T23:59:59';
 
-  // Leads
-  const { data: leads } = await supabase
+  // === FUNNEL METRICS (from funnel_events) ===
+
+  // Leads (contact_subscribed or contact_created events)
+  const subscribedCount = await countEventsByType('contact_subscribed', startDate, endDate);
+  const createdCount = await countEventsByType('contact_created', startDate, endDate);
+  const leads = subscribedCount + createdCount;
+
+  // For ad attribution, we need to check contacts that were created this week
+  const { data: newContacts } = await supabase
     .from('contacts')
     .select('id, ad_id')
     .neq('source', 'instagram_historical')
-    .gte('subscribe_date', startDate)
-    .lte('subscribe_date', endDateTime);
+    .gte('created_at', startDate)
+    .lte('created_at', endDateTime);
 
-  // Qualified
-  const { data: qualified } = await supabase
-    .from('contacts')
-    .select('id')
-    .neq('source', 'instagram_historical')
-    .gte('dm_qualified_date', startDate)
-    .lte('dm_qualified_date', endDateTime);
+  const leads_with_ad = newContacts?.filter(c => c.ad_id).length || 0;
 
-  // Link Clicked
-  const { data: linkClicked } = await supabase
-    .from('contacts')
-    .select('id')
-    .neq('source', 'instagram_historical')
-    .gte('link_click_date', startDate)
-    .lte('link_click_date', endDateTime);
+  // Funnel stages from funnel_events
+  const qualified = await countEventsByType('dm_qualified', startDate, endDate);
+  const link_clicked = await countEventsByType('link_clicked', startDate, endDate);
+  const form_submitted = await countEventsByType('form_submitted', startDate, endDate);
+  const meeting_held = await countEventsByType('appointment_held', startDate, endDate);
 
-  // Form Submitted
-  const { data: formSubmitted } = await supabase
-    .from('contacts')
-    .select('id')
-    .neq('source', 'instagram_historical')
-    .gte('form_submit_date', startDate)
-    .lte('form_submit_date', endDateTime);
+  // Purchase events (deposit_paid, purchase_completed, payment_plan_created)
+  const deposits = await countEventsByType('deposit_paid', startDate, endDate);
+  const fullPurchases = await countEventsByType('purchase_completed', startDate, endDate);
+  const paymentPlans = await countEventsByType('payment_plan_created', startDate, endDate);
+  const purchased = deposits + fullPurchases + paymentPlans;
 
-  // Meeting Held
-  const { data: meetingHeld } = await supabase
-    .from('contacts')
-    .select('id')
-    .neq('source', 'instagram_historical')
-    .gte('appointment_held_date', startDate)
-    .lte('appointment_held_date', endDateTime);
+  // === REVENUE METRICS (from payments table with categories) ===
 
-  // Purchased
-  const { data: purchased } = await supabase
-    .from('contacts')
-    .select('id')
-    .neq('source', 'instagram_historical')
-    .gte('purchase_date', startDate)
-    .lte('purchase_date', endDateTime);
-
-  // Revenue
-  const { data: payments } = await supabase
+  // Cash Collected (actual money received)
+  const { data: cashPayments } = await supabase
     .from('payments')
-    .select('amount')
+    .select('amount, payment_category')
+    .in('payment_category', ['deposit', 'full_purchase', 'downpayment', 'recurring'])
     .gte('payment_date', startDate)
     .lte('payment_date', endDateTime);
 
-  const revenue = payments?.reduce((sum, p) => sum + parseFloat(p.amount || 0), 0) || 0;
+  const cashCollected = cashPayments?.reduce((sum, p) => sum + parseFloat(p.amount || 0), 0) || 0;
+
+  // Projected Revenue (Denefits payment plans)
+  const { data: projectedPayments } = await supabase
+    .from('payments')
+    .select('amount')
+    .eq('payment_category', 'payment_plan')
+    .gte('payment_date', startDate)
+    .lte('payment_date', endDateTime);
+
+  const projectedRevenue = projectedPayments?.reduce((sum, p) => sum + parseFloat(p.amount || 0), 0) || 0;
+
+  // Deposits count (high intent metric)
+  const depositCount = cashPayments?.filter(p => p.payment_category === 'deposit').length || 0;
+
+  // Total payments for count
+  const { data: allPayments } = await supabase
+    .from('payments')
+    .select('id')
+    .gte('payment_date', startDate)
+    .lte('payment_date', endDateTime);
 
   return {
-    leads: leads?.length || 0,
-    leads_with_ad: leads?.filter(l => l.ad_id).length || 0,
-    qualified: qualified?.length || 0,
-    link_clicked: linkClicked?.length || 0,
-    form_submitted: formSubmitted?.length || 0,
-    meeting_held: meetingHeld?.length || 0,
-    purchased: purchased?.length || 0,
-    revenue,
-    payment_count: payments?.length || 0
+    leads: leads || newContacts?.length || 0,
+    leads_with_ad,
+    qualified,
+    link_clicked,
+    form_submitted,
+    meeting_held,
+    purchased,
+    // New revenue breakdown
+    cashCollected,
+    projectedRevenue,
+    depositCount,
+    // Legacy field for backward compat
+    revenue: cashCollected,
+    payment_count: allPayments?.length || 0
   };
 }
 
@@ -145,16 +195,28 @@ async function fetchAdSpend() {
 }
 
 async function fetchTopAds(limit = 3) {
-  // Get ads with most calls (meetings held) this week (by ad_id count in contacts)
+  // Get ads with most calls (meetings held) this week
+  // Uses funnel_events joined with contacts for ad_id
   const week = getThisWeek();
+
+  // Get contacts who had appointment_held events this week
+  const { data: events } = await supabase
+    .from('funnel_events')
+    .select('contact_id')
+    .eq('event_type', 'appointment_held')
+    .gte('event_timestamp', week.start)
+    .lte('event_timestamp', week.end + 'T23:59:59');
+
+  if (!events?.length) return [];
+
+  // Get ad_ids for these contacts
+  const contactIds = [...new Set(events.map(e => e.contact_id))];
 
   const { data: contacts } = await supabase
     .from('contacts')
-    .select('ad_id')
-    .neq('source', 'instagram_historical')
-    .not('ad_id', 'is', null)
-    .gte('appointment_held_date', week.start)
-    .lte('appointment_held_date', week.end + 'T23:59:59');
+    .select('id, ad_id')
+    .in('id', contactIds)
+    .not('ad_id', 'is', null);
 
   // Count by ad_id
   const adCounts = {};
@@ -276,12 +338,24 @@ async function main() {
               <div style="font-size: 12px; color: #6b7280;">Leads</div>
             </div>
             <div style="text-align: center; flex: 1;">
+              <div style="font-size: 24px; font-weight: 700; color: #1e40af;">${activity.depositCount}</div>
+              <div style="font-size: 12px; color: #6b7280;">Deposits</div>
+            </div>
+            <div style="text-align: center; flex: 1;">
               <div style="font-size: 24px; font-weight: 700; color: #1e40af;">${activity.purchased}</div>
               <div style="font-size: 12px; color: #6b7280;">Purchased</div>
             </div>
+          </div>
+
+          <!-- Revenue Breakdown -->
+          <div style="background: #ecfdf5; padding: 16px; display: flex; justify-content: space-between;">
             <div style="text-align: center; flex: 1;">
-              <div style="font-size: 24px; font-weight: 700; color: ${COLORS.success};">$${activity.revenue.toLocaleString()}</div>
-              <div style="font-size: 12px; color: #6b7280;">Revenue</div>
+              <div style="font-size: 24px; font-weight: 700; color: ${COLORS.success};">$${activity.cashCollected.toLocaleString()}</div>
+              <div style="font-size: 12px; color: #6b7280;">Cash Collected</div>
+            </div>
+            <div style="text-align: center; flex: 1;">
+              <div style="font-size: 24px; font-weight: 700; color: #0891b2;">$${activity.projectedRevenue.toLocaleString()}</div>
+              <div style="font-size: 12px; color: #6b7280;">Projected (BNPL)</div>
             </div>
           </div>
 

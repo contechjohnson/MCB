@@ -16,6 +16,7 @@
 npm run dev                           # Start local server
 /db-status                            # Check database health
 /funnel ppcu last 30 days             # Analyze PPCU funnel
+/ppcu-stats last 7 days               # PPCU leads & meetings from GHL
 node execution/sync-meta-ads.js       # Sync Meta Ads manually
 ```
 
@@ -55,6 +56,14 @@ When using Supabase MCP tools (`mcp__supabase__*`), always use project_id: `succ
 | View recent activity | `directives/analytics.md` | `/recent-activity [tenant]` |
 | Source comparison | `directives/analytics.md` | `/source-performance [tenant]` |
 
+### GHL Queries (PPCU)
+
+| I Want To... | Directive | Command |
+|--------------|-----------|---------|
+| PPCU leads & meetings | `.claude/commands/ppcu-stats.md` | `/ppcu-stats [time]` |
+| PPCU meetings only | `.claude/commands/ppcu-meetings.md` | `/ppcu-meetings [time]` |
+| List GHL pipelines | `.claude/commands/ghl-pipelines.md` | `/ghl-pipelines [tenant]` |
+
 ### Content Marketing
 
 | I Want To... | Directive | Command |
@@ -78,6 +87,45 @@ When using Supabase MCP tools (`mcp__supabase__*`), always use project_id: `succ
 
 ---
 
+## Events-First Architecture (Dec 2025)
+
+**Critical Change:** `funnel_events` is the single source of truth. Contacts table holds only identity + current state.
+
+### Contacts Table (Minimal - 20 columns)
+```
+id, tenant_id, created_at, updated_at
+mc_id, ghl_id, ig, ig_id, fb, stripe_customer_id
+email_primary, email_booking, email_payment
+phone, first_name, last_name
+stage, source, ad_id, tags (JSONB)
+```
+
+### Funnel Events Table (Source of Truth)
+Every webhook writes here. Query this for all analytics.
+```sql
+-- Stage counts
+SELECT event_type, COUNT(DISTINCT contact_id)
+FROM funnel_events
+WHERE tenant_id = 'ppcu-uuid' AND event_timestamp >= NOW() - INTERVAL '30 days'
+GROUP BY event_type;
+
+-- Chatbot A/B (via tags)
+SELECT tags->>'chatbot' as variant, COUNT(DISTINCT contact_id)
+FROM funnel_events
+WHERE tags->>'chatbot' IS NOT NULL
+GROUP BY tags->>'chatbot';
+```
+
+### DEPRECATED Columns (Removed Dec 2025)
+These columns no longer exist on contacts - query `funnel_events` instead:
+- ~~subscribe_date~~, ~~dm_qualified_date~~, ~~link_send_date~~, ~~link_click_date~~
+- ~~form_submit_date~~, ~~appointment_date~~, ~~appointment_held_date~~
+- ~~purchase_date~~, ~~deposit_paid_date~~, ~~package_sent_date~~
+- ~~chatbot_ab~~, ~~funnel_variant~~ (use `tags` JSONB instead)
+- ~~purchase_amount~~ (use `payments` table)
+
+---
+
 ## Critical Rules
 
 ### 1. Always Check Today's Date
@@ -89,11 +137,18 @@ WHERE source != 'instagram_historical'
 ```
 537 imported contacts must be excluded from go-forward analytics. See `directives/historical-data.md`.
 
-### 3. Webhooks Always Return 200
+### 3. Query funnel_events for Analytics
+**OLD (BROKEN):** `SELECT COUNT(*) FROM contacts WHERE form_submit_date IS NOT NULL`
+**NEW (CORRECT):** `SELECT COUNT(DISTINCT contact_id) FROM funnel_events WHERE event_type = 'form_submitted'`
+
+### 4. Webhooks Always Return 200
 Even on errors. Prevents retry storms from external systems.
 
-### 4. Email Matching is Case-Insensitive
+### 5. Email Matching is Case-Insensitive
 Use `.ilike()` not `.eq()` when searching by email.
+
+### 6. Tags for Flexible Metadata
+Use JSONB `tags` column for any metadata: `tags->>'chatbot'`, `tags->>'funnel'`, etc.
 
 ---
 
@@ -172,6 +227,9 @@ For multi-tenant, credentials are stored in `tenant_integrations` table.
 | `/weekly-report [tenant]` | Generate full report |
 | `/web-analytics [query]` | Natural language queries |
 | `/content-outliers [niche]` | Find high-performing Instagram content |
+| `/ppcu-stats [time]` | PPCU leads & meetings from GHL (source/attribution breakdowns) |
+| `/ppcu-meetings [time]` | PPCU meetings held only (Calendly + Jane) |
+| `/ghl-pipelines [tenant]` | List GHL pipelines and stages |
 
 ---
 
@@ -196,6 +254,8 @@ Directives are living SOPs. They evolve with the system.
 | Generate report | `weekly-reports.md` | `node execution/weekly-report-ai.js` |
 | Find content outliers | `content-outlier-detection.md` | `/content-outliers "niche"` |
 | Understand historical | `historical-data.md` | Filter `instagram_historical` |
+| PPCU leads & meetings | `ppcu-stats.md` | `/ppcu-stats last 7 days` |
+| PPCU meetings only | `ppcu-meetings.md` | `/ppcu-meetings last 30 days` |
 
 ---
 

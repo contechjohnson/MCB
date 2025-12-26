@@ -85,20 +85,25 @@ Lists recent:
 
 ---
 
-## Funnel Variant Filtering
+## Funnel Variant Filtering (Tags-Based)
 
-**New (Dec 2025):** Filter by funnel variant for A/B testing:
+**As of Dec 2025:** Use JSONB `tags` column for flexible filtering:
 
 ```sql
--- Jane (paid consult) funnel only
-WHERE funnel_variant = 'jane_paid'
+-- Filter funnel_events by chatbot variant
+WHERE tags->>'chatbot' = 'A'  -- or 'B'
 
--- Calendly (free discovery) funnel only
-WHERE funnel_variant = 'calendly_free'
+-- Filter by funnel name (from Perspective)
+WHERE tags->>'funnel' = 'LVNG_BOF_JANE'
 
--- Both (for comparison)
-WHERE funnel_variant IN ('jane_paid', 'calendly_free')
+-- Filter by any custom tag
+WHERE tags->>'campaign' = 'holiday_2025'
+
+-- Contacts with chatbot tag
+WHERE tags ? 'chatbot'  -- has the key
 ```
+
+**DEPRECATED:** `funnel_variant` and `chatbot_ab` columns on contacts (use tags instead)
 
 See `directives/funnel-ab-testing.md` for full documentation.
 
@@ -114,10 +119,80 @@ Default time range: 60 days (longer for meaningful comparison)
 
 ---
 
+## Data Architecture (Events-First)
+
+**As of Dec 2025:** Events are the single source of truth. Contact date columns are DEPRECATED.
+
+**Primary Sources:**
+| Data Type | Table | Notes |
+|-----------|-------|-------|
+| **Funnel history** | `funnel_events` | **SOURCE OF TRUTH** - timestamped events |
+| Revenue | `payments` | With `payment_category` |
+| Contact identity | `contacts` | Identity + current stage + tags only |
+
+**Contacts Table (Minimal):**
+- Identity: `id`, `email_*`, `phone`, `first_name`, `last_name`
+- Platform IDs: `mc_id`, `ghl_id`, `stripe_customer_id`
+- Current state: `stage`, `source`
+- First-touch: `ad_id`
+- Flexible metadata: `tags` (JSONB)
+
+**DEPRECATED Contact Columns (no longer updated):**
+- `subscribe_date`, `dm_qualified_date`, `link_send_date`, `link_click_date`
+- `form_submit_date`, `appointment_date`, `appointment_held_date`
+- `purchase_date`, `deposit_paid_date`, `package_sent_date`
+- `chatbot_ab`, `funnel_variant` (use `tags` instead)
+
+**Query funnel_events for all analytics** - never rely on contact date columns for new data.
+
+---
+
+## Revenue Metrics
+
+| Metric | Query |
+|--------|-------|
+| **Cash Collected** | `WHERE payment_category IN ('deposit', 'full_purchase', 'downpayment', 'recurring')` |
+| **Projected Revenue** | `WHERE payment_category = 'payment_plan'` |
+| **Deposits (high intent)** | `WHERE payment_category = 'deposit'` |
+
+```sql
+-- Cash Collected this week
+SELECT SUM(amount) as cash_collected
+FROM payments
+WHERE payment_category IN ('deposit', 'full_purchase', 'downpayment', 'recurring')
+  AND payment_date >= NOW() - INTERVAL '7 days';
+
+-- Projected Revenue (Denefits BNPL)
+SELECT SUM(amount) as projected_revenue
+FROM payments
+WHERE payment_category = 'payment_plan'
+  AND payment_date >= NOW() - INTERVAL '7 days';
+```
+
+---
+
 ## Common Queries
 
-### Funnel Conversion
+### Funnel Conversion (Events-Based)
 ```sql
+SELECT
+  event_type,
+  COUNT(DISTINCT contact_id) as contacts
+FROM funnel_events
+WHERE tenant_id = 'tenant-uuid'
+  AND event_timestamp >= NOW() - INTERVAL '30 days'
+  AND event_type IN (
+    'contact_subscribed', 'dm_qualified', 'link_clicked',
+    'form_submitted', 'appointment_held', 'purchase_completed'
+  )
+GROUP BY event_type;
+```
+
+### Funnel Conversion (DEPRECATED - Contact Fields)
+**⚠️ DO NOT USE for new analytics.** Contact date columns are no longer updated (Dec 2025).
+Only use this pattern for historical data before Dec 2025:
+```sql
+-- DEPRECATED: Use funnel_events query above instead
 SELECT
   COUNT(*) as total,
   COUNT(CASE WHEN dm_qualified_date IS NOT NULL THEN 1 END) as dm_qualified,
@@ -182,8 +257,34 @@ ORDER BY revenue DESC NULLS LAST
 LIMIT 10;
 ```
 
-### Funnel Variant Comparison
+### Funnel Variant Comparison (Events-Based with Tags)
 ```sql
+-- Compare funnel variants using tags on funnel_events
+WITH variant_stages AS (
+  SELECT
+    tags->>'chatbot' as variant,
+    event_type,
+    COUNT(DISTINCT contact_id) as contacts
+  FROM funnel_events
+  WHERE tenant_id = 'tenant-uuid'
+    AND event_timestamp >= NOW() - INTERVAL '60 days'
+    AND tags->>'chatbot' IS NOT NULL
+  GROUP BY tags->>'chatbot', event_type
+)
+SELECT
+  variant,
+  MAX(CASE WHEN event_type = 'contact_subscribed' THEN contacts END) as leads,
+  MAX(CASE WHEN event_type = 'form_submitted' THEN contacts END) as form_submitted,
+  MAX(CASE WHEN event_type = 'appointment_held' THEN contacts END) as meeting_held,
+  MAX(CASE WHEN event_type = 'purchase_completed' THEN contacts END) as purchased
+FROM variant_stages
+GROUP BY variant;
+```
+
+### Funnel Variant Comparison (DEPRECATED - Contact Fields)
+**⚠️ DO NOT USE for new analytics.** Uses deprecated contact columns.
+```sql
+-- DEPRECATED: Use events-based query above instead
 SELECT
   funnel_variant,
   COUNT(*) as total_leads,
@@ -326,6 +427,7 @@ CREATE INDEX idx_contacts_tenant_stage ON contacts(tenant_id, stage);
 |------|-------|------------|
 | 2025-11-08 | Funnel showing inflated numbers | Added `source != 'instagram_historical'` filter |
 | 2025-11-13 | MC→GHL linkage showing 100% | Bug: was counting NULLs wrong. Fixed query logic |
+| 2025-12-25 | Dual-write complexity causing confusion | **Events-first architecture**: Stopped updating contact date columns. `funnel_events` is now single source of truth. Contact date columns deprecated. |
 
 ### Detailed Learnings
 

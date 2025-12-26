@@ -2,18 +2,72 @@
 description: Display recent database activity and new contacts
 ---
 
-Show recent database activity with limit: $ARGUMENTS.
+Show recent activity for $ARGUMENTS.
 
-**IMPORTANT:** Always filter `WHERE source != 'instagram_historical'` to exclude imported historical data.
+Use the analytics-agent subagent to query recent funnel events (events-first architecture):
 
-Use the analytics-agent subagent to display:
-1. New contacts in the last 24 hours
-2. Recent purchases
-3. Recent meetings held
-4. Recent webhook events (if available via logs)
+**Recent Events Query:**
+```sql
+SELECT
+  fe.event_type,
+  fe.event_timestamp,
+  fe.source,
+  c.first_name,
+  c.email_primary,
+  c.stage,
+  fe.tags
+FROM funnel_events fe
+JOIN contacts c ON fe.contact_id = c.id
+WHERE fe.tenant_id = '[tenant_uuid]'
+  AND fe.event_timestamp >= NOW() - INTERVAL '[time_range]'
+ORDER BY fe.event_timestamp DESC
+LIMIT 25;
+```
 
-For each contact, include: name, email, source, stage, timestamp
+**New Contacts Query:**
+```sql
+SELECT
+  first_name,
+  email_primary,
+  stage,
+  source,
+  tags->>'chatbot' as chatbot_variant,
+  tags->>'funnel' as funnel_name,
+  created_at
+FROM contacts
+WHERE tenant_id = '[tenant_uuid]'
+  AND created_at >= NOW() - INTERVAL '[time_range]'
+  AND source != 'instagram_historical'
+ORDER BY created_at DESC
+LIMIT 20;
+```
 
-Present as a chronological timeline with key events highlighted.
+**Recent Payments Query:**
+```sql
+SELECT
+  c.first_name,
+  c.email_primary,
+  p.amount,
+  p.payment_category,
+  p.payment_source,
+  p.payment_date
+FROM payments p
+LEFT JOIN contacts c ON p.contact_id = c.id
+WHERE p.tenant_id = '[tenant_uuid]'
+  AND p.payment_date >= NOW() - INTERVAL '[time_range]'
+ORDER BY p.payment_date DESC
+LIMIT 10;
+```
 
-If no limit is specified, default to 20 contacts.
+**Present Results:**
+1. Summary of activity counts by event type
+2. List of new contacts with key details
+3. List of recent payments
+4. Any orphan payments (contact_id IS NULL)
+
+**IMPORTANT:**
+- Query funnel_events table (events-first architecture)
+- Always filter `WHERE source != 'instagram_historical'` to exclude imported data
+- Default time range: 7 days if not specified
+- Default tenant: PPCU if not specified
+- Supabase Project ID: `succdcwblbzikenhhlrz`

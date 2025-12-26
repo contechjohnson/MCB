@@ -130,7 +130,22 @@ async function getOrCreateThread() {
 }
 
 /**
+ * Count events by type within a date range (from funnel_events)
+ */
+async function countEventsByType(eventType, startStr, endStr) {
+  const { count } = await supabase
+    .from('funnel_events')
+    .select('contact_id', { count: 'exact' })
+    .eq('event_type', eventType)
+    .gte('event_timestamp', startStr)
+    .lte('event_timestamp', endStr + 'T23:59:59');
+
+  return count || 0;
+}
+
+/**
  * Fetch this week's analytics data
+ * Uses funnel_events as primary source for stage metrics
  */
 async function fetchWeekData(weekEnding) {
   console.log(`📊 Fetching analytics for week ending ${weekEnding}...\n`);
@@ -142,14 +157,28 @@ async function fetchWeekData(weekEnding) {
   const startStr = startDate.toISOString().split('T')[0];
   const endStr = endDate.toISOString().split('T')[0];
 
-  // Get contacts for the week (excluding historical AND lead magnet)
+  // === FUNNEL METRICS (from funnel_events) ===
+
+  // Get new contacts this week (for total count and ad attribution)
   const { data: contacts } = await supabase
     .from('contacts')
-    .select('*')
+    .select('id, ad_id, source')
     .not('source', 'like', '%_historical%')
     .not('source', 'eq', 'instagram_lm')
-    .gte('subscribe_date', startStr)
-    .lte('subscribe_date', endStr);
+    .gte('created_at', startStr)
+    .lte('created_at', endStr + 'T23:59:59');
+
+  // Funnel stages from funnel_events
+  const dmQualified = await countEventsByType('dm_qualified', startStr, endStr);
+  const linkClicked = await countEventsByType('link_clicked', startStr, endStr);
+  const formSubmitted = await countEventsByType('form_submitted', startStr, endStr);
+  const scheduledDCs = await countEventsByType('appointment_scheduled', startStr, endStr);
+  const arrivedDCs = await countEventsByType('appointment_held', startStr, endStr);
+
+  // Purchase events
+  const deposits = await countEventsByType('deposit_paid', startStr, endStr);
+  const fullPurchases = await countEventsByType('purchase_completed', startStr, endStr);
+  const paymentPlans = await countEventsByType('payment_plan_created', startStr, endStr);
 
   // Get lead magnet stats (all-time, not just this week)
   const { data: lmContacts } = await supabase
@@ -163,12 +192,41 @@ async function fetchWeekData(weekEnding) {
     revenue: lmContacts?.reduce((sum, c) => sum + (parseFloat(c.purchase_amount) || 0), 0) || 0
   };
 
-  // Get payments for the week
-  const { data: payments } = await supabase
+  // === REVENUE METRICS (from payments table with categories) ===
+
+  // Cash Collected (actual money received)
+  const { data: cashPayments } = await supabase
+    .from('payments')
+    .select('amount, payment_category, payment_source')
+    .in('payment_category', ['deposit', 'full_purchase', 'downpayment', 'recurring'])
+    .gte('payment_date', startStr)
+    .lte('payment_date', endStr + 'T23:59:59');
+
+  const cashCollected = cashPayments?.reduce((sum, p) => sum + parseFloat(p.amount || 0), 0) || 0;
+  const stripeRevenue = cashPayments?.filter(p => p.payment_source === 'stripe')
+    .reduce((sum, p) => sum + parseFloat(p.amount || 0), 0) || 0;
+  const denefitsCashCollected = cashPayments?.filter(p => p.payment_source === 'denefits')
+    .reduce((sum, p) => sum + parseFloat(p.amount || 0), 0) || 0;
+
+  // Projected Revenue (Denefits payment plans)
+  const { data: projectedPayments } = await supabase
+    .from('payments')
+    .select('amount')
+    .eq('payment_category', 'payment_plan')
+    .gte('payment_date', startStr)
+    .lte('payment_date', endStr + 'T23:59:59');
+
+  const projectedRevenue = projectedPayments?.reduce((sum, p) => sum + parseFloat(p.amount || 0), 0) || 0;
+
+  // Deposit count (high intent)
+  const depositCount = cashPayments?.filter(p => p.payment_category === 'deposit').length || 0;
+
+  // All payments for count
+  const { data: allPayments } = await supabase
     .from('payments')
     .select('*')
     .gte('payment_date', startStr)
-    .lte('payment_date', endStr);
+    .lte('payment_date', endStr + 'T23:59:59');
 
   // Get Meta ad spend (from insights table)
   const { data: adInsights } = await supabase
@@ -180,35 +238,25 @@ async function fetchWeekData(weekEnding) {
   const totalSpend = adInsights?.reduce((sum, i) => sum + parseFloat(i.spend || 0), 0) || 0;
 
   // Calculate key metrics
-  const totalContacts = contacts.length;
-  const dmQualified = contacts.filter(c => c.dm_qualified_date).length;
+  const totalContacts = contacts?.length || 0;
   const qualifyRate = totalContacts > 0 ? (dmQualified / totalContacts * 100).toFixed(1) : 0;
-  const withAdId = contacts.filter(c => c.ad_id).length;
+  const withAdId = contacts?.filter(c => c.ad_id).length || 0;
   const attributionCoverage = totalContacts > 0 ? (withAdId / totalContacts * 100).toFixed(1) : 0;
 
-  const scheduledDCs = contacts.filter(c => c.meeting_booked_date).length;
-  const arrivedDCs = contacts.filter(c => c.meeting_held_date).length;
   const showRate = scheduledDCs > 0 ? (arrivedDCs / scheduledDCs * 100).toFixed(1) : 0;
-  const closed = contacts.filter(c => c.purchase_amount > 0).length;
+  const closed = deposits + fullPurchases + paymentPlans;
   const closeRate = arrivedDCs > 0 ? (closed / arrivedDCs * 100).toFixed(1) : 0;
 
-  const totalRevenue = payments?.reduce((sum, p) => sum + parseFloat(p.amount), 0) || 0;
-  const stripeRevenue = payments?.filter(p => p.payment_source === 'stripe')
-    .reduce((sum, p) => sum + parseFloat(p.amount), 0) || 0;
-  const denefitsRevenue = payments?.filter(p => p.payment_source === 'denefits')
-    .reduce((sum, p) => sum + parseFloat(p.amount), 0) || 0;
+  const roas = totalSpend > 0 ? (cashCollected / totalSpend).toFixed(2) : 0;
 
-  const roas = totalSpend > 0 ? (totalRevenue / totalSpend).toFixed(2) : 0;
-
-  // Get top performing ads
+  // Get top performing ads (by contacts created this week with that ad_id)
   const adStats = {};
-  contacts.forEach(c => {
+  (contacts || []).forEach(c => {
     if (c.ad_id) {
       if (!adStats[c.ad_id]) {
-        adStats[c.ad_id] = { contacts: 0, qualified: 0 };
+        adStats[c.ad_id] = { contacts: 0 };
       }
       adStats[c.ad_id].contacts++;
-      if (c.dm_qualified_date) adStats[c.ad_id].qualified++;
     }
   });
 
@@ -216,8 +264,8 @@ async function fetchWeekData(weekEnding) {
     .map(([adId, stats]) => ({
       adId,
       contacts: stats.contacts,
-      qualified: stats.qualified,
-      qualifyRate: (stats.qualified / stats.contacts * 100).toFixed(1)
+      qualified: 0, // Will be filled from funnel_events if needed
+      qualifyRate: '0'
     }))
     .sort((a, b) => b.contacts - a.contacts)
     .slice(0, 5);
@@ -258,14 +306,20 @@ async function fetchWeekData(weekEnding) {
       showRate,
       closed,
       closeRate,
-      totalRevenue,
+      // Revenue breakdown
+      cashCollected,
+      projectedRevenue,
       stripeRevenue,
-      denefitsRevenue,
+      denefitsCashCollected,
+      depositCount,
+      // Legacy fields for backward compat
+      totalRevenue: cashCollected,
+      denefitsRevenue: denefitsCashCollected,
       totalSpend,
       roas
     },
     topAds,
-    payments: payments?.length || 0,
+    payments: allPayments?.length || 0,
     leadMagnet: lmStats
   };
 }
@@ -301,11 +355,17 @@ THIS WEEK'S DATA:
 - Scheduled DCs: ${weekData.metrics.scheduledDCs}
 - Arrived DCs: ${weekData.metrics.arrivedDCs} (${weekData.metrics.showRate}% show rate)
 - Closed: ${weekData.metrics.closed} (${weekData.metrics.closeRate}% close rate)
-- Revenue: $${weekData.metrics.totalRevenue.toFixed(2)} (${weekData.payments} payments)
+
+REVENUE BREAKDOWN (${weekData.payments} payments):
+- Cash Collected: $${weekData.metrics.cashCollected.toFixed(2)} (actual money received)
   - Stripe: $${weekData.metrics.stripeRevenue.toFixed(2)}
-  - Denefits: $${weekData.metrics.denefitsRevenue.toFixed(2)}
+  - Denefits (downpayments + recurring): $${weekData.metrics.denefitsCashCollected.toFixed(2)}
+- Projected Revenue (BNPL): $${weekData.metrics.projectedRevenue.toFixed(2)} (Denefits financed amounts)
+- Deposits Paid: ${weekData.metrics.depositCount} ($100 high-intent deposits)
+
+AD PERFORMANCE:
 - Ad Spend: $${weekData.metrics.totalSpend.toFixed(2)}
-- ROAS: ${weekData.metrics.roas}x
+- ROAS (on cash collected): ${weekData.metrics.roas}x
 
 TOP PERFORMING ADS:
 ${weekData.topAds.map((ad, i) => `${i+1}. Ad ...${ad.adId.slice(-6)} (${ad.adName})
