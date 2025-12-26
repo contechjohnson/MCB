@@ -228,7 +228,7 @@ async function generateWeeklyReport(
     // Continue with report generation even if sync fails
   }
 
-    const [activity, adSpend, topAds, activeContacts] = await Promise.all([
+  const [activity, adSpend, topAds, activeContacts] = await Promise.all([
       fetchWeekActivity(tenantId, week.start, week.end),
       fetchAdSpend(tenantId),
       fetchTopAds(tenantId, week.start, week.end),
@@ -269,17 +269,13 @@ async function generateWeeklyReport(
       </div></body></html>`
     });
 
-    if (error) {
-      console.error('Email error:', error);
-      return NextResponse.json({ error: 'Failed to send email' }, { status: 500 });
-    }
-
-    console.log(`✅ Weekly report sent with ${activeContacts.length} contacts attached`);
-    return NextResponse.json({ success: true, week: week.label, contactsExported: activeContacts.length });
-  } catch (err) {
-    console.error('Cron error:', err);
-    return NextResponse.json({ error: 'Internal error' }, { status: 500 });
+  if (error) {
+    console.error('Email error:', error);
+    throw new Error('Failed to send email');
   }
+
+  console.log(`✅ Weekly report sent with ${activeContacts.length} contacts attached`);
+  return { success: true, week: week.label, contactsExported: activeContacts.length };
 }
 
 export const runtime = 'nodejs';

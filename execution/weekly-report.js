@@ -152,19 +152,20 @@ async function fetchWeekActivity(startDate, endDate) {
   const denefitsDownpayments = denefitsContracts?.reduce((sum, p) => sum + parseFloat(p.denefits_downpayment || 0), 0) || 0;
   const depositCount = denefitsContracts?.filter(p => parseFloat(p.denefits_downpayment || 0) > 0).length || 0;
 
-  // Denefits monthly installments (actual cash received from existing plans)
-  const { data: denefitsMonthly } = await supabase
+  // Denefits recurring payments (monthly installments toward existing contracts)
+  const { data: denefitsRecurring } = await supabase
     .from('payments')
     .select('amount')
     .eq('payment_source', 'denefits')
-    .eq('payment_type', 'monthly_payment')
+    .eq('payment_category', 'recurring')
     .gte('payment_date', startDate)
     .lte('payment_date', endDateTime);
 
-  const monthlyInstallments = denefitsMonthly?.reduce((sum, p) => sum + parseFloat(p.amount || 0), 0) || 0;
+  const recurringPayments = denefitsRecurring?.reduce((sum, p) => sum + parseFloat(p.amount || 0), 0) || 0;
+  const recurringCount = denefitsRecurring?.length || 0;
 
-  // CASH COLLECTED = Stripe + Denefits downpayments + monthly installments
-  const cashCollected = stripeTotal + denefitsDownpayments + monthlyInstallments;
+  // CASH COLLECTED = Stripe + Denefits downpayments + recurring payments
+  const cashCollected = stripeTotal + denefitsDownpayments + recurringPayments;
 
   // PROJECTED REVENUE = Stripe + Denefits contract value (new contracts only)
   const projectedRevenue = stripeTotal + denefitsContractValue;
@@ -192,10 +193,13 @@ async function fetchWeekActivity(startDate, endDate) {
     meeting_held,
     purchased,
     // Revenue breakdown
-    cashCollected,        // Actual money in bank (Stripe + deposits + installments)
+    cashCollected,        // Actual money in bank (Stripe + deposits + recurring)
     projectedRevenue,     // Total value from efforts (Stripe + new BNPL contracts)
     depositsTotal,        // Just the BNPL deposits (subset of cashCollected)
     depositCount,
+    recurringPayments,    // BNPL recurring payments (monthly installments)
+    recurringCount,
+    stripeTotal,          // Stripe payments
     // Total revenue = projected (value from this period's efforts)
     revenue: projectedRevenue,
     payment_count: allPayments?.length || 0
@@ -261,23 +265,36 @@ async function fetchTopAds(limit = 3) {
     adCounts[c.ad_id] = (adCounts[c.ad_id] || 0) + 1;
   }
 
-  // Sort and get top
-  const sorted = Object.entries(adCounts)
+  // Filter out invalid ad_ids and sort by count
+  const validAdCounts = Object.entries(adCounts)
+    .filter(([adId]) => {
+      // Skip template variables and non-numeric IDs
+      if (adId.includes('{{') || adId.includes('}}')) return false;
+      if (adId === 'link_in_bio' || adId === 'organic') return false;
+      return true;
+    })
     .sort((a, b) => b[1] - a[1])
     .slice(0, limit);
 
   // Get ad names
   const topAds = [];
-  for (const [adId, count] of sorted) {
+  for (const [adId, count] of validAdCounts) {
     const { data: ad } = await supabase
       .from('meta_ads')
       .select('ad_name')
       .eq('ad_id', adId)
       .single();
 
+    // Use actual name, or show truncated ID if not found
+    let displayName = ad?.ad_name;
+    if (!displayName) {
+      // Show last 6 digits for readability: "Ad ...500065"
+      displayName = adId.length > 10 ? `Ad ...${adId.slice(-6)}` : `Ad ${adId}`;
+    }
+
     topAds.push({
       ad_id: adId,
-      ad_name: ad?.ad_name || `Ad ${adId}`,
+      ad_name: displayName,
       calls: count
     });
   }
@@ -394,20 +411,25 @@ async function main() {
           <div style="background: #ecfdf5; padding: 20px;">
             <table style="width: 100%; border-collapse: collapse;">
               <tr>
-                <td style="text-align: center; padding: 12px; width: 33%;">
-                  <div style="font-size: 28px; font-weight: 700; color: ${COLORS.success};">$${activity.cashCollected.toLocaleString()}</div>
+                <td style="text-align: center; padding: 12px; width: 50%;">
+                  <div style="font-size: 32px; font-weight: 700; color: ${COLORS.success};">$${activity.cashCollected.toLocaleString()}</div>
                   <div style="font-size: 13px; color: #6b7280; margin-top: 4px;">Cash Collected</div>
                 </td>
-                <td style="text-align: center; padding: 12px; width: 33%;">
-                  <div style="font-size: 28px; font-weight: 700; color: #1e40af;">$${activity.projectedRevenue.toLocaleString()}</div>
+                <td style="text-align: center; padding: 12px; width: 50%;">
+                  <div style="font-size: 32px; font-weight: 700; color: #1e40af;">$${activity.projectedRevenue.toLocaleString()}</div>
                   <div style="font-size: 13px; color: #6b7280; margin-top: 4px;">Projected Revenue</div>
-                </td>
-                <td style="text-align: center; padding: 12px; width: 33%;">
-                  <div style="font-size: 28px; font-weight: 700; color: #7c3aed;">$${(activity.depositsTotal || 0).toLocaleString()}</div>
-                  <div style="font-size: 13px; color: #6b7280; margin-top: 4px;">BNPL Deposits</div>
                 </td>
               </tr>
             </table>
+            <div style="margin-top: 12px; padding-top: 12px; border-top: 1px solid #d1fae5;">
+              <table style="width: 100%; font-size: 12px; color: #6b7280;">
+                <tr>
+                  <td>Stripe: $${(activity.stripeTotal || 0).toLocaleString()}</td>
+                  <td style="text-align: center;">BNPL Deposits: $${(activity.depositsTotal || 0).toLocaleString()}</td>
+                  <td style="text-align: right;">BNPL Recurring: $${(activity.recurringPayments || 0).toLocaleString()}</td>
+                </tr>
+              </table>
+            </div>
           </div>
 
           <!-- Funnel Chart -->

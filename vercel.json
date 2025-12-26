@@ -17,11 +17,7 @@
   ],
   "crons": [
     {
-      "path": "/api/cron/weekly-report",
-      "schedule": "0 22 * * 4"
-    },
-    {
-      "path": "/api/cron/centner-weekly-report",
+      "path": "/api/cron/weekly-report?all=true",
       "schedule": "0 22 * * 4"
     }
   ]

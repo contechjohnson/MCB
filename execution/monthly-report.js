@@ -131,19 +131,19 @@ async function fetchWeekActivity(startDate, endDate) {
   const denefitsContractValue = denefitsContracts?.reduce((sum, p) => sum + parseFloat(p.amount || 0), 0) || 0;
   const denefitsDownpayments = denefitsContracts?.reduce((sum, p) => sum + parseFloat(p.denefits_downpayment || 0), 0) || 0;
 
-  // Denefits monthly installments
-  const { data: denefitsMonthly } = await supabase
+  // Denefits recurring payments (monthly installments toward existing contracts)
+  const { data: denefitsRecurring } = await supabase
     .from('payments')
     .select('amount')
     .eq('payment_source', 'denefits')
-    .eq('payment_type', 'monthly_payment')
+    .eq('payment_category', 'recurring')
     .gte('payment_date', startDate)
     .lte('payment_date', endDateTime);
 
-  const monthlyInstallments = denefitsMonthly?.reduce((sum, p) => sum + parseFloat(p.amount || 0), 0) || 0;
+  const recurringPayments = denefitsRecurring?.reduce((sum, p) => sum + parseFloat(p.amount || 0), 0) || 0;
 
-  // CASH COLLECTED = Stripe + Denefits downpayments + monthly installments
-  const cashCollected = stripeTotal + denefitsDownpayments + monthlyInstallments;
+  // CASH COLLECTED = Stripe + Denefits downpayments + recurring payments
+  const cashCollected = stripeTotal + denefitsDownpayments + recurringPayments;
 
   // PROJECTED REVENUE = Stripe + Denefits contract value (new contracts only)
   const projectedRevenue = stripeTotal + denefitsContractValue;
@@ -163,6 +163,8 @@ async function fetchWeekActivity(startDate, endDate) {
     cashCollected,        // Actual money in bank
     projectedRevenue,     // Total value from efforts
     depositsTotal,        // BNPL deposits (subset of cashCollected)
+    recurringPayments,    // BNPL recurring payments (monthly installments)
+    stripeTotal,          // Stripe payments
     // Total revenue = projected (value from this period's efforts)
     revenue: projectedRevenue
   };
@@ -279,6 +281,8 @@ async function main() {
     cashCollected: weekData.reduce((s, d) => s + (d.cashCollected || 0), 0),
     projectedRevenue: weekData.reduce((s, d) => s + (d.projectedRevenue || 0), 0),
     depositsTotal: weekData.reduce((s, d) => s + (d.depositsTotal || 0), 0),
+    recurringPayments: weekData.reduce((s, d) => s + (d.recurringPayments || 0), 0),
+    stripeTotal: weekData.reduce((s, d) => s + (d.stripeTotal || 0), 0),
     revenue: weekData.reduce((s, d) => s + d.revenue, 0)
   };
 
@@ -344,20 +348,25 @@ async function main() {
           <div style="background: #ecfdf5; padding: 20px;">
             <table style="width: 100%; border-collapse: collapse;">
               <tr>
-                <td style="text-align: center; padding: 12px; width: 33%;">
-                  <div style="font-size: 28px; font-weight: 700; color: ${COLORS.success};">$${totals.cashCollected.toLocaleString()}</div>
+                <td style="text-align: center; padding: 12px; width: 50%;">
+                  <div style="font-size: 32px; font-weight: 700; color: ${COLORS.success};">$${totals.cashCollected.toLocaleString()}</div>
                   <div style="font-size: 13px; color: #6b7280; margin-top: 4px;">Cash Collected</div>
                 </td>
-                <td style="text-align: center; padding: 12px; width: 33%;">
-                  <div style="font-size: 28px; font-weight: 700; color: #1e40af;">$${totals.projectedRevenue.toLocaleString()}</div>
+                <td style="text-align: center; padding: 12px; width: 50%;">
+                  <div style="font-size: 32px; font-weight: 700; color: #1e40af;">$${totals.projectedRevenue.toLocaleString()}</div>
                   <div style="font-size: 13px; color: #6b7280; margin-top: 4px;">Projected Revenue</div>
-                </td>
-                <td style="text-align: center; padding: 12px; width: 33%;">
-                  <div style="font-size: 28px; font-weight: 700; color: #7c3aed;">$${totals.depositsTotal.toLocaleString()}</div>
-                  <div style="font-size: 13px; color: #6b7280; margin-top: 4px;">BNPL Deposits</div>
                 </td>
               </tr>
             </table>
+            <div style="margin-top: 12px; padding-top: 12px; border-top: 1px solid #d1fae5;">
+              <table style="width: 100%; font-size: 12px; color: #6b7280;">
+                <tr>
+                  <td>Stripe: $${(totals.stripeTotal || 0).toLocaleString()}</td>
+                  <td style="text-align: center;">BNPL Deposits: $${(totals.depositsTotal || 0).toLocaleString()}</td>
+                  <td style="text-align: right;">BNPL Recurring: $${(totals.recurringPayments || 0).toLocaleString()}</td>
+                </tr>
+              </table>
+            </div>
           </div>
 
           <!-- Revenue Chart -->
@@ -448,9 +457,13 @@ async function main() {
                 <td style="padding: 6px 0; color: #6b7280;">Form → Meeting Held</td>
                 <td style="padding: 6px 0; text-align: right;">${totals.form_submitted > 0 ? Math.round(totals.meeting_held / totals.form_submitted * 100) : 0}%</td>
               </tr>
+              <tr style="border-bottom: 1px solid #e5e7eb;">
+                <td style="padding: 6px 0; color: #6b7280;"><strong>Meeting Held → Purchase</strong></td>
+                <td style="padding: 6px 0; text-align: right; font-weight: 600; color: ${COLORS.success};">${totals.meeting_held > 0 ? Math.round(totals.purchased / totals.meeting_held * 100) : 0}%</td>
+              </tr>
               <tr>
-                <td style="padding: 6px 0; color: #6b7280;"><strong>Lead → Purchase</strong></td>
-                <td style="padding: 6px 0; text-align: right; font-weight: 600;">${totals.leads > 0 ? (totals.purchased / totals.leads * 100).toFixed(1) : 0}%</td>
+                <td style="padding: 6px 0; color: #6b7280;">Lead → Purchase</td>
+                <td style="padding: 6px 0; text-align: right;">${totals.leads > 0 ? (totals.purchased / totals.leads * 100).toFixed(1) : 0}%</td>
               </tr>
             </table>
           </div>

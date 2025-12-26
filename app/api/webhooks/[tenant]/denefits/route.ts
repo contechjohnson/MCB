@@ -89,10 +89,11 @@ export async function POST(
     // Handle different webhook types
     if (webhookType === 'contract.payments.recurring_payment') {
       console.log(`Recurring payment for contract ${contractCode}`);
+      console.log(`  Amount: $${recurringAmount}, Email: ${email}`);
 
       // Create individual recurring payment record (cash collected)
       const recurringPaymentId = `${contractCode}_recurring_${Date.now()}`;
-      await supabaseAdmin.from('payments').insert({
+      const { data: insertedPayment, error: insertError } = await supabaseAdmin.from('payments').insert({
         tenant_id: tenant.id,
         contact_id: contactId || null,
         payment_event_id: recurringPaymentId,
@@ -111,9 +112,15 @@ export async function POST(
         denefits_recurring_amount: recurringAmount,
         denefits_remaining_payments: remainingPayments,
         raw_payload: body,
-      });
+      }).select();
+
+      if (insertError) {
+        console.error(`  ❌ Failed to insert recurring payment:`, insertError);
+        throw new Error(`Failed to insert recurring payment: ${insertError.message}`);
+      }
+
       paymentCreated = true;
-      console.log(`  ✅ Recurring payment $${recurringAmount} recorded for contract ${contractCode}`);
+      console.log(`  ✅ Recurring payment $${recurringAmount} recorded for contract ${contractCode}`, insertedPayment);
 
       // Create recurring_payment_received event if contact exists
       if (contactId) {
@@ -133,7 +140,7 @@ export async function POST(
       console.log(`Creating payment records for contract ${contractCode}`);
 
       // 1. Create payment_plan record (projected revenue - total financed amount)
-      await supabaseAdmin.from('payments').insert({
+      const { error: planError } = await supabaseAdmin.from('payments').insert({
         tenant_id: tenant.id,
         contact_id: contactId || null,
         payment_event_id: `${contractCode}_plan`,
@@ -156,11 +163,16 @@ export async function POST(
         denefits_remaining_payments: remainingPayments,
         raw_payload: body,
       });
+
+      if (planError) {
+        console.error(`  ❌ Failed to insert payment plan:`, planError);
+        throw new Error(`Failed to insert payment plan: ${planError.message}`);
+      }
       console.log(`  ✅ Payment plan $${financedAmount} recorded (projected revenue)`);
 
       // 2. Create downpayment record if downpayment > 0 (cash collected)
       if (downpayment > 0) {
-        await supabaseAdmin.from('payments').insert({
+        const { error: downpaymentError } = await supabaseAdmin.from('payments').insert({
           tenant_id: tenant.id,
           contact_id: contactId || null,
           payment_event_id: `${contractCode}_downpayment`,
@@ -178,6 +190,11 @@ export async function POST(
           denefits_contract_code: contractCode,
           raw_payload: body,
         });
+
+        if (downpaymentError) {
+          console.error(`  ❌ Failed to insert downpayment:`, downpaymentError);
+          throw new Error(`Failed to insert downpayment: ${downpaymentError.message}`);
+        }
         console.log(`  ✅ Downpayment $${downpayment} recorded (cash collected)`);
       }
 
