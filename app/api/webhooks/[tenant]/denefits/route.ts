@@ -91,8 +91,38 @@ export async function POST(
       console.log(`Recurring payment for contract ${contractCode}`);
       console.log(`  Amount: $${recurringAmount}, Email: ${email}`);
 
+      // Create idempotent payment ID using contract code + remaining payments count
+      // This ensures the same webhook retry won't create duplicates
+      const recurringPaymentId = `${contractCode}_recurring_${remainingPayments}`;
+
+      // Check if this payment already exists (idempotency check)
+      const { data: existingPayment } = await supabaseAdmin
+        .from('payments')
+        .select('id')
+        .eq('payment_event_id', recurringPaymentId)
+        .single();
+
+      if (existingPayment) {
+        console.log(`  ℹ️ Recurring payment already exists: ${recurringPaymentId}`);
+        // Return success - this is a retry of an already-processed webhook
+        await logWebhook(supabaseAdmin, {
+          tenant_id: tenant.id,
+          source: 'denefits',
+          event_type: webhookType,
+          payload: body,
+          contact_id: contactId,
+          status: 'duplicate',
+        });
+        return webhookSuccess({
+          contact_id: contactId,
+          event_type: webhookType,
+          tenant: tenantSlug,
+          duplicate: true,
+          payment_id: existingPayment.id,
+        });
+      }
+
       // Create individual recurring payment record (cash collected)
-      const recurringPaymentId = `${contractCode}_recurring_${Date.now()}`;
       const { data: insertedPayment, error: insertError } = await supabaseAdmin.from('payments').insert({
         tenant_id: tenant.id,
         contact_id: contactId || null,
@@ -321,6 +351,7 @@ export async function GET(
 
 /**
  * Find contact by email with retry logic (tenant-scoped)
+ * Uses separate queries instead of .or() with .ilike() to avoid 406 errors
  */
 async function findContactWithRetry(
   tenantId: string,
@@ -329,6 +360,7 @@ async function findContactWithRetry(
 ): Promise<string | null> {
   if (!email) return null;
 
+  const normalizedEmail = email.toLowerCase().trim();
   const delays = [0, 5000, 15000];
 
   for (let i = 0; i < maxRetries; i++) {
@@ -337,19 +369,46 @@ async function findContactWithRetry(
       await new Promise((resolve) => setTimeout(resolve, delays[i]));
     }
 
-    const { data: contact } = await supabaseAdmin
+    // Try email_primary first (most common)
+    let { data: contact } = await supabaseAdmin
       .from('contacts')
       .select('id')
       .eq('tenant_id', tenantId)
-      .or(`email_primary.ilike.${email},email_booking.ilike.${email},email_payment.ilike.${email}`)
+      .ilike('email_primary', normalizedEmail)
       .single();
 
     if (contact) {
-      if (i > 0) console.log(`  ✅ Contact found on retry ${i}`);
+      if (i > 0) console.log(`  ✅ Contact found on retry ${i} via email_primary`);
+      return contact.id;
+    }
+
+    // Try email_booking
+    ({ data: contact } = await supabaseAdmin
+      .from('contacts')
+      .select('id')
+      .eq('tenant_id', tenantId)
+      .ilike('email_booking', normalizedEmail)
+      .single());
+
+    if (contact) {
+      if (i > 0) console.log(`  ✅ Contact found on retry ${i} via email_booking`);
+      return contact.id;
+    }
+
+    // Try email_payment
+    ({ data: contact } = await supabaseAdmin
+      .from('contacts')
+      .select('id')
+      .eq('tenant_id', tenantId)
+      .ilike('email_payment', normalizedEmail)
+      .single());
+
+    if (contact) {
+      if (i > 0) console.log(`  ✅ Contact found on retry ${i} via email_payment`);
       return contact.id;
     }
   }
 
-  console.warn(`  ❌ Contact not found after ${maxRetries} attempts`);
+  console.warn(`  ❌ Contact not found after ${maxRetries} attempts for: ${normalizedEmail}`);
   return null;
 }
