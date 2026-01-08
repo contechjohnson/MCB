@@ -51,6 +51,7 @@ When using Supabase MCP tools (`mcp__supabase__*`), always use project_id: `succ
 
 | I Want To... | Directive | Command |
 |--------------|-----------|---------|
+| Full funnel/revenue report | `.claude/skills/funnel-report.md` | `/funnel-report [time]` |
 | Analyze funnel | `directives/analytics.md` | `/funnel [tenant] [time]` |
 | Check data quality | `directives/analytics.md` | `/data-quality [tenant]` |
 | View recent activity | `directives/analytics.md` | `/recent-activity [tenant]` |
@@ -219,6 +220,7 @@ For multi-tenant, credentials are stored in `tenant_integrations` table.
 
 | Command | Description |
 |---------|-------------|
+| `/funnel-report [time]` | Full funnel/revenue report with attribution |
 | `/funnel [tenant] [time]` | Conversion funnel analysis |
 | `/data-quality [tenant]` | Find missing fields, orphans |
 | `/source-performance [tenant]` | Compare Instagram vs website |
@@ -248,6 +250,7 @@ Directives are living SOPs. They evolve with the system.
 
 | Task | Directive | Quick Command |
 |------|-----------|---------------|
+| Full funnel/revenue report | `funnel-report.md` | `/funnel-report last 7 days` |
 | Check funnel | `analytics.md` | `/funnel ppcu` |
 | Debug webhook | `webhooks.md` | Query `webhook_logs` |
 | Sync ads | `meta-ads-sync.md` | `node execution/sync-meta-ads.js` |
