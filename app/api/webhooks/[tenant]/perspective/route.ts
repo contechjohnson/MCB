@@ -74,15 +74,32 @@ export async function POST(
       });
     }
 
-    // Store RAW funnel name - no auto-derivation
-    // Tags come from the webhook payload or are set here minimally
+    // Store RAW funnel name + auto-derive booking_source and traffic_source
     const rawFunnelName = body.funnelName || 'unknown';
+    const funnelLower = rawFunnelName.toLowerCase();
 
-    // Build tags: just store the funnel name, no auto-derivation
-    // Additional tags can be passed in the webhook payload via body.tags
+    // Auto-derive booking_source from funnel name
+    let bookingSource: string | null = null;
+    if (funnelLower.includes('calendly')) {
+      bookingSource = 'calendly';
+    } else if (funnelLower.includes('jane')) {
+      bookingSource = 'jane';
+    }
+
+    // Auto-derive traffic_source from funnel name
+    let trafficSource: string | null = null;
+    if (funnelLower.includes('manychat')) {
+      trafficSource = 'manychat';
+    } else if (funnelLower.includes('website') || funnelLower.includes('other')) {
+      trafficSource = 'website_other';
+    }
+
+    // Build tags with auto-derived values + any passed from payload
     const tags: Record<string, any> = {
       funnel: rawFunnelName,
-      ...(body.tags || {}), // Accept any tags from payload
+      ...(bookingSource && { booking_source: bookingSource }),
+      ...(trafficSource && { traffic_source: trafficSource }),
+      ...(body.tags || {}), // Accept any tags from payload (can override)
     };
 
     // Include perspective funnel ID if available
