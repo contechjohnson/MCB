@@ -69,9 +69,16 @@ export async function POST(
     const contract = body.data?.contract || body;
     const email = contract.customer_email || body.customer_email || body.email || body.customer?.email;
 
-    // Find contact with retry
-    console.log(`Looking up contact for email: ${email}`);
-    const contactId = await findContactWithRetry(tenant.id, email);
+    // Find contact with email → phone → name+appointment fallback
+    const customerPhone = contract.customer_mobile || body.customer_phone || null;
+    const customerName = `${contract.customer_first_name || ''} ${contract.customer_last_name || ''}`.trim() || null;
+    console.log(`Looking up contact for email: ${email}, phone: ${customerPhone}`);
+    const { contactId, matchMethod } = await findContactWithRetry(tenant.id, email, customerPhone, customerName);
+
+    // Log match method for attribution auditing
+    if (matchMethod !== 'email' && matchMethod !== 'no_data') {
+      console.log(`[${tenantSlug}] Denefits contact matched via ${matchMethod} for ${email || 'no email'}`);
+    }
 
     const contractId = contract.contract_id;
     const contractCode = contract.contract_code;
@@ -243,11 +250,9 @@ export async function POST(
       return webhookSuccess({ orphan: true, tenant: tenantSlug });
     }
 
-    // Update contact if payment was created (events-first: no deprecated date/amount columns)
-    if (paymentCreated) {
-      // Determine event type based on webhook type
-      const eventType = webhookType === 'contract.created' ? 'payment_plan_created' : 'purchase_completed';
-
+    // Update contact stage and fire purchase event for NEW contracts only
+    // (recurring payments already fire recurring_payment_received above)
+    if (paymentCreated && webhookType === 'contract.created') {
       await supabaseAdmin.rpc('update_contact_with_event', {
         p_contact_id: contactId,
         p_update_data: {
@@ -255,52 +260,50 @@ export async function POST(
           stage: 'purchased',
           updated_at: new Date().toISOString(),
         },
-        p_event_type: eventType,
+        p_event_type: 'payment_plan_created',
         p_source: 'denefits',
         p_source_event_id: contractCode || `denefits_${contractId}`,
       });
 
-      // Fire Meta CAPI Purchase event for new contracts
-      if (paymentCreated && webhookType === 'contract.created') {
-        const metaClient = MetaCAPIClient.fromTenant(tenant);
+      // Fire Meta CAPI Purchase event
+      const metaClient = MetaCAPIClient.fromTenant(tenant);
 
-        // Get contact details for CAPI
-        const { data: contactData } = await supabaseAdmin
-          .from('contacts')
-          .select('id, email_primary, phone, first_name, last_name, fbclid, fbp, fbc, ad_id')
-          .eq('id', contactId)
-          .single();
+      // Get contact details for CAPI
+      const { data: contactData } = await supabaseAdmin
+        .from('contacts')
+        .select('id, email_primary, phone, first_name, last_name, fbclid, fbp, fbc, ad_id')
+        .eq('id', contactId)
+        .single();
 
-        if (metaClient && contactData) {
-          try {
-            const purchaseEvent = createPurchaseEvent(
-              {
-                email: email || contactData.email_primary,
-                phone: contactData.phone || contract.customer_mobile,
-                firstName: contactData.first_name || contract.customer_first_name,
-                lastName: contactData.last_name || contract.customer_last_name,
-                fbp: contactData.fbp,
-                fbc: contactData.fbc,
-                externalId: contactData.id,
-              },
-              financedAmount,
-              {
-                adId: contactData.ad_id,
-                contentName: 'Denefits BNPL Purchase',
-                orderId: contractCode,
-              }
-            );
+      if (metaClient && contactData) {
+        try {
+          const purchaseEvent = createPurchaseEvent(
+            {
+              email: email || contactData.email_primary,
+              phone: contactData.phone || contract.customer_mobile,
+              firstName: contactData.first_name || contract.customer_first_name,
+              lastName: contactData.last_name || contract.customer_last_name,
+              fbp: contactData.fbp,
+              fbc: contactData.fbc,
+              externalId: contactData.id,
+            },
+            financedAmount,
+            {
+              adId: contactData.ad_id,
+              contentName: 'Denefits BNPL Purchase',
+              orderId: contractCode,
+            }
+          );
 
-            await queueCAPIEvent(tenant.id, {
-              ...purchaseEvent,
-              contactId: contactData.id,
-            });
+          await queueCAPIEvent(tenant.id, {
+            ...purchaseEvent,
+            contactId: contactData.id,
+          });
 
-            console.log(`[${tenantSlug}] Meta CAPI Purchase event queued for contact:`, contactData.id, `amount: $${financedAmount}`);
-          } catch (capiError) {
-            console.error(`[${tenantSlug}] Failed to queue CAPI event:`, capiError);
-            // Don't fail the webhook for CAPI errors
-          }
+          console.log(`[${tenantSlug}] Meta CAPI Purchase event queued for contact:`, contactData.id, `amount: $${financedAmount}`);
+        } catch (capiError) {
+          console.error(`[${tenantSlug}] Failed to queue CAPI event:`, capiError);
+          // Don't fail the webhook for CAPI errors
         }
       }
     }
@@ -350,65 +353,141 @@ export async function GET(
 }
 
 /**
- * Find contact by email with retry logic (tenant-scoped)
+ * Normalize phone to E.164 format for matching
+ */
+function normalizePhone(phone?: string | null): string | null {
+  if (!phone) return null;
+  const digits = phone.replace(/\D/g, '');
+  if (digits.length === 10) return `+1${digits}`;
+  if (digits.length === 11 && digits.startsWith('1')) return `+${digits}`;
+  return digits.length > 0 ? `+${digits}` : null;
+}
+
+/**
+ * Find contact by email with retry logic, then phone fallback (tenant-scoped)
  * Uses separate queries instead of .or() with .ilike() to avoid 406 errors
+ *
+ * Match priority:
+ * 1. Email across all 3 email fields (with retry)
+ * 2. Phone number (normalized E.164)
+ * 3. Name + recent appointment_held event (last 14 days)
  */
 async function findContactWithRetry(
   tenantId: string,
   email: string | undefined,
+  phone?: string | null,
+  customerName?: string | null,
   maxRetries = 3
-): Promise<string | null> {
-  if (!email) return null;
+): Promise<{ contactId: string | null; matchMethod: string }> {
+  if (!email && !phone && !customerName) {
+    return { contactId: null, matchMethod: 'no_data' };
+  }
 
-  const normalizedEmail = email.toLowerCase().trim();
+  const normalizedEmail = email?.toLowerCase().trim();
   const delays = [0, 5000, 15000];
 
-  for (let i = 0; i < maxRetries; i++) {
-    if (delays[i] > 0) {
-      console.log(`  Retry ${i}: Waiting ${delays[i] / 1000}s...`);
-      await new Promise((resolve) => setTimeout(resolve, delays[i]));
-    }
+  // 1. Email-based matching with retries
+  if (normalizedEmail) {
+    for (let i = 0; i < maxRetries; i++) {
+      if (delays[i] > 0) {
+        console.log(`  Retry ${i}: Waiting ${delays[i] / 1000}s...`);
+        await new Promise((resolve) => setTimeout(resolve, delays[i]));
+      }
 
-    // Try email_primary first (most common)
-    let { data: contact } = await supabaseAdmin
-      .from('contacts')
-      .select('id')
-      .eq('tenant_id', tenantId)
-      .ilike('email_primary', normalizedEmail)
-      .single();
+      // Try email_primary first (most common)
+      let { data: contact } = await supabaseAdmin
+        .from('contacts')
+        .select('id')
+        .eq('tenant_id', tenantId)
+        .ilike('email_primary', normalizedEmail)
+        .single();
 
-    if (contact) {
-      if (i > 0) console.log(`  ✅ Contact found on retry ${i} via email_primary`);
-      return contact.id;
-    }
+      if (contact) {
+        if (i > 0) console.log(`  ✅ Contact found on retry ${i} via email_primary`);
+        return { contactId: contact.id, matchMethod: 'email' };
+      }
 
-    // Try email_booking
-    ({ data: contact } = await supabaseAdmin
-      .from('contacts')
-      .select('id')
-      .eq('tenant_id', tenantId)
-      .ilike('email_booking', normalizedEmail)
-      .single());
+      // Try email_booking
+      ({ data: contact } = await supabaseAdmin
+        .from('contacts')
+        .select('id')
+        .eq('tenant_id', tenantId)
+        .ilike('email_booking', normalizedEmail)
+        .single());
 
-    if (contact) {
-      if (i > 0) console.log(`  ✅ Contact found on retry ${i} via email_booking`);
-      return contact.id;
-    }
+      if (contact) {
+        if (i > 0) console.log(`  ✅ Contact found on retry ${i} via email_booking`);
+        return { contactId: contact.id, matchMethod: 'email' };
+      }
 
-    // Try email_payment
-    ({ data: contact } = await supabaseAdmin
-      .from('contacts')
-      .select('id')
-      .eq('tenant_id', tenantId)
-      .ilike('email_payment', normalizedEmail)
-      .single());
+      // Try email_payment
+      ({ data: contact } = await supabaseAdmin
+        .from('contacts')
+        .select('id')
+        .eq('tenant_id', tenantId)
+        .ilike('email_payment', normalizedEmail)
+        .single());
 
-    if (contact) {
-      if (i > 0) console.log(`  ✅ Contact found on retry ${i} via email_payment`);
-      return contact.id;
+      if (contact) {
+        if (i > 0) console.log(`  ✅ Contact found on retry ${i} via email_payment`);
+        return { contactId: contact.id, matchMethod: 'email' };
+      }
     }
   }
 
-  console.warn(`  ❌ Contact not found after ${maxRetries} attempts for: ${normalizedEmail}`);
-  return null;
+  // 2. Phone-based fallback
+  const normalizedPhone = normalizePhone(phone);
+  if (normalizedPhone) {
+    console.log(`  📞 Trying phone fallback: ${normalizedPhone}`);
+    const { data: phoneContact } = await supabaseAdmin
+      .from('contacts')
+      .select('id')
+      .eq('tenant_id', tenantId)
+      .eq('phone', normalizedPhone)
+      .single();
+
+    if (phoneContact) {
+      console.log(`  ✅ Contact found via phone: ${phoneContact.id}`);
+      return { contactId: phoneContact.id, matchMethod: 'phone' };
+    }
+  }
+
+  // 3. Name + recent appointment_held fallback
+  if (customerName) {
+    const firstName = customerName.split(' ')[0]?.toLowerCase().trim();
+    if (firstName && firstName.length > 1) {
+      console.log(`  👤 Trying name+appointment fallback: ${firstName}`);
+      const fourteenDaysAgo = new Date(Date.now() - 14 * 24 * 60 * 60 * 1000).toISOString();
+
+      const { data: recentAppointments } = await supabaseAdmin
+        .from('funnel_events')
+        .select('contact_id')
+        .eq('event_type', 'appointment_held')
+        .gte('event_timestamp', fourteenDaysAgo)
+        .execute();
+
+      if (recentAppointments && recentAppointments.length > 0) {
+        const contactIds = [...new Set(recentAppointments.map((e: any) => e.contact_id))];
+
+        for (let i = 0; i < contactIds.length; i += 50) {
+          const batch = contactIds.slice(i, i + 50);
+          const { data: matchingContacts } = await supabaseAdmin
+            .from('contacts')
+            .select('id, first_name')
+            .eq('tenant_id', tenantId)
+            .in('id', batch)
+            .ilike('first_name', firstName)
+            .execute();
+
+          if (matchingContacts && matchingContacts.length === 1) {
+            console.log(`  ✅ Contact found via name+appointment: ${matchingContacts[0].id}`);
+            return { contactId: matchingContacts[0].id, matchMethod: 'name_appointment' };
+          }
+        }
+      }
+    }
+  }
+
+  console.warn(`  ❌ Contact not found after all attempts for: ${normalizedEmail || 'no email'}`);
+  return { contactId: null, matchMethod: 'none' };
 }
